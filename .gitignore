@@ -1,0 +1,13 @@
+# ignore some dirs
+log/
+debug/
+pretrained_models/
+vis_feat/
+data/
+figs/
+snapshots/
+vis_dir/
+exper.bak/
+# ignore spefic files
+*.so
+*.py[cod]
