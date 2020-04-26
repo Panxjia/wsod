@@ -7,7 +7,7 @@ data/
 figs/
 snapshots/
 vis_dir/
-exper.bak/
+models/carafe/
 # ignore spefic files
 *.so
 *.py[cod]
