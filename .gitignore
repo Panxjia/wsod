@@ -8,6 +8,7 @@ figs/
 snapshots/
 vis_dir/
 models/carafe/
+venv/
 # ignore spefic files
 *.so
 *.py[cod]

@@ -121,10 +121,15 @@ class opts(object):
         self.parser.add_argument("--th_bg", type=float, default=0.3, help='the variance threshold for back ground.')
         self.parser.add_argument("--th_fg", type=float, default=0.5, help='the class threshold for fore ground.')
         self.parser.add_argument("--loc_start", type=float, default=10, help='the start epoch to add location loss.')
-        self.parser.add_argument("--cls_start", type=float, default=20, help='the start epoch to modify classification using location prediction.')
+        self.parser.add_argument("--cls_start", type=float, default=120, help='the start epoch to modify classification using location prediction.')
         self.parser.add_argument("--loss_w_3", type=float, default=1., help='weight of classification loss for 3-th level.')
         self.parser.add_argument("--loss_w_4", type=float, default=1., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--loss_w_5", type=float, default=1., help='weight of classification loss for 5-th level.')
+        self.parser.add_argument("--erase_start", type=float, default=10, help='the start epoch to erase discriminal region.')
+        self.parser.add_argument("--erase_th", type=float, default=0.2, help='the threshold to detemine the discriminal region.')
+        self.parser.add_argument("--erase", action='store_true', help='switch on erasing strategy.')
+        self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
+        self.parser.add_argument("--bifpn", action='store_true', help='switch on adopting bifpn architecture.')
 
     def parse(self):
         opt = self.parser.parse_args()
@@ -288,7 +293,7 @@ def train(args):
 
             loss_val, loss_f3, loss_f4, loss_f5, loss_loc, = model.module.get_loss(logits,child_label,
                     protype_h = protype_h, protype_v=protype_v, epoch=current_epoch,
-                    loc_start=args.loc_start, cls_start=args.cls_start)
+                    loc_start=args.loc_start, erase_start=args.erase_start)
 
             # write into tensorboard
             writer.add_scalar('loss_val', loss_val, global_counter)

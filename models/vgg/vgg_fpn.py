@@ -35,8 +35,22 @@ class VGG(nn.Module):
         self.num_classes = num_classes
         self.args = args
 
-        self.cls = nn.Sequential(
-            nn.Conv2d(128, 512, kernel_size=3, padding=1),
+        self.cls5 = nn.Sequential(
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
+        )
+        self.cls4 = nn.Sequential(
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
+        )
+        self.cls3 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -46,43 +60,64 @@ class VGG(nn.Module):
         # self.cls_4 = nn.Conv2d(128, self.num_classes, kernel_size=1, padding=0)
         # self.cls_5 = nn.Conv2d(128, self.num_classes, kernel_size=1, padding=0)
 
-        self.fpn_mix4_1 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3,  padding=1)
-        )
-        self.fpn_mix3_2 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
-        )
-        self.fpn_mix4_2 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
-        )
-        self.fpn_mix5_2 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
-        )
+        if self.args.bifpn:
+            self.fpn_mix4_1 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, kernel_size=3,  padding=1)
+            )
+            self.fpn_mix3_2 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+            self.fpn_mix4_2 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+            self.fpn_mix5_2 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
 
-        self.fpn_f4_0_1 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
-        self.fpn_f3_0_2 = nn.Conv2d(256, 128, kernel_size=1, padding=0)
-        self.fpn_f4_0_2 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
-        self.fpn_f4_1_2 = nn.Conv2d(128, 128, kernel_size=1, padding=0)
-        self.fpn_f5_0_2 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
-        self.fpn_f5_0_41 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
-        self.fpn_f3_2_down = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.fpn_f4_2_down = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-
+            self.fpn_f4_0_1 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_f3_0_2 = nn.Conv2d(256, 128, kernel_size=1, padding=0)
+            self.fpn_f4_0_2 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_f4_1_2 = nn.Conv2d(128, 128, kernel_size=1, padding=0)
+            self.fpn_f5_0_2 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_f5_0_41 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_f3_2_down = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.fpn_f4_2_down = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        elif self.args.fpn:
+            self.fpn_lat_3 = nn.Conv2d(256, 128, kernel_size=1, padding=0)
+            self.fpn_lat_4 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_lat_5 = nn.Conv2d(512, 128, kernel_size=1, padding=0)
+            self.fpn_out_3 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 256, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+            self.fpn_out_4 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 512, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+            self.fpn_out_5 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 512, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True)
+            )
+        else:
+            pass
 
         if self.args.loc_branch:
             self.loc = nn.Sequential(
-                nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),  # fc6
+                nn.Conv2d(128, 512, kernel_size=3, padding=1, dilation=1),  # fc6
                 nn.ReLU(True),
-                nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1),  # fc7
+                nn.Conv2d(512, 512, kernel_size=3, padding=1, dilation=1),  # fc7
                 nn.ReLU(True),
-                nn.Conv2d(1024, 1, kernel_size=1, padding=0)
+                nn.Conv2d(512, 1, kernel_size=1, padding=0)
             )
             # self.loc = nn.Sequential(
             #     nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),  # fc6
@@ -95,22 +130,6 @@ class VGG(nn.Module):
             #     nn.ReLU(True),
             #     nn.Conv2d(1024, self.num_classes + 1, kernel_size=1, padding=0)
             # )
-        if self.args.com_feat:
-            self.conv35 = nn.Sequential(
-                nn.Conv2d(256, 128, kernel_size=1, padding=0, dilation=1),  # fc6
-            )
-            self.conv45 = nn.Sequential(
-                nn.Conv2d(512, 128, kernel_size=1, padding=0, dilation=1),  # fc6
-            )
-            self.conv55 = nn.Sequential(
-                nn.Conv2d(512, 128, kernel_size=1, padding=0, dilation=1),  # fc6
-            )
-
-            self.merge = nn.Sequential(
-                nn.ReLU(),
-                nn.Conv2d(128, 512, kernel_size=1, padding=0, dilation=1),
-                nn.ReLU()
-            )
 
         self._initialize_weights()
 
@@ -142,10 +161,10 @@ class VGG(nn.Module):
         self.feat_4 = feat_4
         feat_5 = self.conv5(feat_4)
         self.feat_5 = feat_5
-        self.construct_bifpn()
-        cls_map_3 = self.cls(self.f3_2)
-        cls_map_4 = self.cls(self.f4_2)
-        cls_map_5 = self.cls(self.f5_2)
+        self.construct_fpn()
+        cls_map_3 = self.cls3(self.f3_2)
+        cls_map_4 = self.cls4(self.f4_2)
+        cls_map_5 = self.cls5(self.f5_2)
 
         if self.args.loc_branch:
             if self.args.com_feat:
@@ -164,32 +183,43 @@ class VGG(nn.Module):
 
         return cls_map_3, cls_map_4, cls_map_5
 
-    def construct_bifpn(self):
-        """
-        F5_0  ------------------------> F5_2 ------>
-            | ------------ |             ^
-                           V             |
-        F4_0  ----------  F4_1 -------- F4_2 ------>
-            | ------------ | ------------^^
-                           | ----------- V
-        F3_0 -------------------------- F3_2 ------>
-        :return: F3_2, F4_2, F5_2
+    def construct_fpn(self):
+        if self.args.bifpn:
+            """
+            F5_0  ------------------------> F5_2 ------>
+                | ------------ |             ^
+                               V             |
+            F4_0  ----------  F4_1 -------- F4_2 ------>
+                | ------------ | ------------^^
+                               | ----------- V
+            F3_0 -------------------------- F3_2 ------>
+            :return: F3_2, F4_2, F5_2
+    
+            """
 
-        """
-        f5_0, f4_0, f3_0 = self.feat_5, self.feat_4, self.feat_3
-        f5_0_41 = self.fpn_f5_0_41(f5_0)
-        self.fpn_f5_0_41_up = F.interpolate(f5_0_41, scale_factor=2, mode='bilinear', align_corners=True)
+            f5_0, f4_0, f3_0 = self.feat_5, self.feat_4, self.feat_3
+            f5_0_41 = self.fpn_f5_0_41(f5_0)
+            self.fpn_f5_0_41_up = F.interpolate(f5_0_41, scale_factor=2, mode='bilinear', align_corners=True)
 
-        f4_1 = self.fpn_mix4_1(self.fpn_f5_0_41_up + self.fpn_f4_0_1(f4_0))
-        self.f4_1_up = F.interpolate(f4_1, scale_factor=2, mode='bilinear', align_corners=True)
+            f4_1 = self.fpn_mix4_1(self.fpn_f5_0_41_up + self.fpn_f4_0_1(f4_0))
+            self.f4_1_up = F.interpolate(f4_1, scale_factor=2, mode='bilinear', align_corners=True)
 
-        f3_2 = self.fpn_mix3_2(self.fpn_f3_0_2(f3_0) + self.f4_1_up)
-        f4_2 = self.fpn_mix4_2(self.fpn_f4_0_2(f4_0) + self.fpn_f4_1_2(f4_1) + self.fpn_f3_2_down(f3_2) )
-        f5_2 = self.fpn_mix5_2(self.fpn_f5_0_2(f5_0)+self.fpn_f4_2_down(f4_2))
+            f3_2 = self.fpn_mix3_2(self.fpn_f3_0_2(f3_0) + self.f4_1_up)
+            f4_2 = self.fpn_mix4_2(self.fpn_f4_0_2(f4_0) + self.fpn_f4_1_2(f4_1) + self.fpn_f3_2_down(f3_2) )
+            f5_2 = self.fpn_mix5_2(self.fpn_f5_0_2(f5_0)+self.fpn_f4_2_down(f4_2))
 
-        self.f3_2 = f3_2
-        self.f4_2 = f4_2
-        self.f5_2 = f5_2
+            self.f3_2 = f3_2
+            self.f4_2 = f4_2
+            self.f5_2 = f5_2
+        if self.args.fpn:
+            f5_0, f4_0, f3_0 = self.feat_5, self.feat_4, self.feat_3
+            lateral_5_conv = self.fpn_lat_5(f5_0)
+            self.f5_2 = self.fpn_out_5(lateral_5_conv) + f5_0
+            f5_up = F.interpolate(lateral_5_conv, scale_factor=2, mode='bilinear', align_corners=True)
+            lateral_4_conv = self.fpn_lat_4(f4_0) + f5_up
+            self.f4_2 = self.fpn_out_4(lateral_4_conv) + f4_0
+            f4_up = F.interpolate(lateral_4_conv, scale_factor=2, mode='bilinear', align_corners=True)
+            self.f3_2 = self.fpn_out_3(self.fpn_lat_3(f3_0) + f4_up) + f3_0
 
 
     def non_local(self, feat, f_phi, f_theta,kernel=3):
@@ -273,15 +303,33 @@ class VGG(nn.Module):
             loss += ((map_cls_v - cls_prot_v[cls_i, :])**2).sum()
         loss = loss /len(gt_label)
         return loss
+    def norm_atten_map(self, map):
+        min_val, _ = torch.min(torch.min(map, dim=-1, keepdim=True)[0], dim=-1, keepdim=True)
+        max_val, _ = torch.max(torch.max(map, dim=-1, keepdim=True)[0], dim=-1, keepdim=True)
+        norm_map = (map - min_val) / (max_val - min_val + 1e-15)
+        return norm_map
 
-
-    def get_loss(self, logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, loc_start=10, cls_start=120):
+    def get_loss(self, logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, loc_start=10, erase_start=10):
 
         logits_3, logits_4, logits_5 = logits
-        if epoch >= cls_start:
-            loc_map = self.get_loc_maps().clone()
-            loc_map = loc_map.expand_as(logits)
-            logits = logits * loc_map
+        if self.args.erase and epoch >= erase_start:
+            n, c = logits_3.size()[:2]
+            atten_map_3 = logits_3[torch.arange(n), gt_child_label.long(), ...]
+            atten_map_4 = logits_4[torch.arange(n), gt_child_label.long(), ...]
+
+            norm_atten_map_3 = self.norm_atten_map(atten_map_3.clone())
+            norm_atten_map_4 = self.norm_atten_map(atten_map_4.clone())
+
+            norm_atten_mask_3 = norm_atten_map_3 < self.args.erase_th
+            norm_atten_mask_3 = norm_atten_mask_3.float().unsqueeze(1).repeat(1,c,1,1)
+            norm_atten_mask_4 = norm_atten_map_4 < self.args.erase_th
+            norm_atten_mask_4 = norm_atten_mask_4.float().unsqueeze(1).repeat(1,c,1,1)
+
+            norm_atten_mask_3 = F.max_pool2d(norm_atten_mask_3, kernel_size=2, stride=2)
+            norm_atten_mask_4 = F.max_pool2d(norm_atten_mask_4, kernel_size=2, stride=2)
+
+            logits_4 = logits_4 * norm_atten_mask_3.detach()
+            logits_5 = logits_5 * norm_atten_mask_4.detach()
 
         cls_logits_3 = torch.mean(torch.mean(logits_3, dim=2), dim=2)
         cls_logits_4 = torch.mean(torch.mean(logits_4, dim=2), dim=2)

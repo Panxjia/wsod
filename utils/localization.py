@@ -52,13 +52,19 @@ def get_topk_boxes(logits, cam_map, im_file, input_size, crop_size, topk=(1, ), 
     return result, maxk_maps
 
 def get_topk_boxes_hier(logits3, logits2, logits1, cam_map, parent_map, root_map, im_file, input_size, crop_size,
-                        topk=(1, ), threshold=0.2, mode='union', gt=None,gcam=False, g2=False, NoHDA=False, bin_map=False):
+                        topk=(1, ), threshold=0.2, mode='union', gt=None,gcam=False, g2=False, NoHDA=False,
+                        com_feat=False, bin_map=False):
     logits3 = logits3.data.cpu().numpy()
     if not NoHDA:
         logits2 = logits2.data.cpu().numpy()
         logits1 = logits1.data.cpu().numpy()
-
-    cam_map = cam_map.data.cpu().numpy()
+    if com_feat:
+        cam_map_0, cam_map_1, cam_map_2 = cam_map
+        cam_map_0 = cam_map_0.data.cpu().numpy()
+        cam_map_1 = cam_map_1.data.cpu().numpy()
+        cam_map_2 = cam_map_2.data.cpu().numpy()
+    else:
+        cam_map = cam_map.data.cpu().numpy()
     if not NoHDA:
         parent_map = parent_map.data.cpu().numpy()
         root_map = root_map.data.cpu().numpy()
@@ -87,14 +93,25 @@ def get_topk_boxes_hier(logits3, logits2, logits1, cam_map, parent_map, root_map
                     parent_map_ = parent_map[0, i, :, :]
                     root_map_ = root_map[0, i, :, :]
             else:
-                cam_map_ = cam_map[0, species_cls[i], :, :]
+                if com_feat:
+                    cam_map_0_ = cam_map_0[0, species_cls[i], :, :]
+                    cam_map_1_ = cam_map_1[0, species_cls[i], :, :]
+                    cam_map_2_ = cam_map_2[0, species_cls[i], :, :]
+                else:
+                    cam_map_ = cam_map[0, species_cls[i], :, :]
                 if not NoHDA:
                     parent_map_ = parent_map[0, parent_cls[i], :, :]
                     root_map_ = root_map[0, root_cls[i], :, :]
-            if not NoHDA:
-                cam_map_ = cam_map_ + parent_map_ + root_map_
-
-            cam_map_ = norm_atten_map(cam_map_)  # normalize cam map
+                    cam_map_ = cam_map_ + parent_map_ + root_map_
+            if com_feat:
+                cam_map_0_ = norm_atten_map(cam_map_0_)  # normalize cam map
+                cam_map_1_ = norm_atten_map(cam_map_1_)  # normalize cam map
+                cam_map_2_ = norm_atten_map(cam_map_2_)  # normalize cam map
+                cam_map_ = cam_map_0_ + cam_map_1_ + cam_map_2_
+                cam_map_ = norm_atten_map(cam_map_)
+                # cam_map_ = np.maximum(cam_map_0_, cam_map_1_, cam_map_2_)
+            else:
+                cam_map_ = norm_atten_map(cam_map_)  # normalize cam map
             # parent_map_ = norm_atten_map(parent_map_)  # normalize cam map
             # root_map_ = norm_atten_map(root_map_)  # normalize cam map
             # cam_map_ = np.maximum(cam_map_, parent_map_)  # normalize cam map
