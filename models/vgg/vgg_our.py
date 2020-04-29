@@ -31,7 +31,7 @@ class VGG(nn.Module):
         self.conv3 = nn.Sequential(*features[cnvs[0]:cnvs[1]])
         self.conv4 = nn.Sequential(*features[cnvs[1]:cnvs[2]])
         # self.conv1_4 = nn.Sequential(*features[:-5])
-        self.conv5 = nn.Sequential(*features[cnvs[2]:-1])
+        self.conv5 = nn.Sequential(*features[cnvs[2]:])
         self.fmp = features[-1]  # final max pooling
         self.num_classes = num_classes
         self.args = args
@@ -255,11 +255,6 @@ class VGG(nn.Module):
 
 
     def get_loss(self, logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, loc_start=10, cls_start=120):
-
-        if epoch >= cls_start:
-            loc_map = self.get_loc_maps().clone()
-            loc_map = loc_map.expand_as(logits)
-            logits = logits * loc_map
 
         cls_logits = torch.mean(torch.mean(logits, dim=2), dim=2)
         loss = 0

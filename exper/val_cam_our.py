@@ -473,7 +473,7 @@ def val(args):
             # loc_map = loc_map[:,:-1,...] - loc_map[:,-1:,...]
             # bg_map = loc_map[0,-1,...].data.cpu().numpy()
             # bg_map = norm_atten_map(bg_map)
-        # loc_map = F.interpolate(loc_map[:,:args.num_classes,...], size=args.size, mode='bilinear', align_corners=True)
+        loc_map = F.interpolate(loc_map, size=args.size, mode='bilinear', align_corners=True)
 
         for th in args.threshold:
             df_deterr_1, df_locerr_1, df_deterr_5, df_locerr_5,df_top_maps, df_top5_boxes = eval_loc(cls_logits, loc_map, img_path[0], args.input_size,
