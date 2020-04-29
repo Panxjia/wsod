@@ -20,7 +20,7 @@ idx2catename = {
 
 
 def save_im_heatmap_box(im_file, top_maps, topk_boxes, save_dir, gt_label=None, gt_box=None, sim_map=None,
-                        epoch=100, threshold=-1,bg_map=None, gcam=False, g2=False):
+                        epoch=100, threshold=-1,bg_map=None, gcam=False, g2=False, suffix=''):
     im = cv2.imread(im_file)
     h, w, _ = np.shape(im)
 
@@ -63,11 +63,11 @@ def save_im_heatmap_box(im_file, top_maps, topk_boxes, save_dir, gt_label=None, 
         os.makedirs(save_dir)
     save_name = str(gt_label[0])+'_'+str(epoch)+'_'+im_file.split('/')[-1]
     if gcam:
-        save_name = save_name.replace('.','th-{}_gcam.'.format(threshold))
+        save_name = save_name.replace('.','th-{}_gcam_{}.'.format(threshold, suffix))
     elif g2:
-        save_name = save_name.replace('.', 'th-{}_g2.'.format(threshold))
+        save_name = save_name.replace('.', 'th-{}_g2_{}.'.format(threshold, suffix))
     else:
-        save_name = save_name.replace('.', 'th-{}.'.format(threshold))
+        save_name = save_name.replace('.', 'th-{}_{}.'.format(threshold, suffix))
     cv2.imwrite(os.path.join(save_dir, save_name), im_to_save)
 
 def cal_iou(box1, box2):

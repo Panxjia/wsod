@@ -7,7 +7,7 @@ from torch.autograd import Variable
 import os
 import cv2
 import numpy as np
-from ..carafe.carafe import CARAFEPack
+# from ..carafe.carafe import CARAFEPack
 
 __all__ = ['Inception3', 'model']
 
