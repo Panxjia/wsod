@@ -8,15 +8,15 @@ python val_cam_fpn.py \
     --dataset=cub \
     --img_dir=../data/CUB_200_2011/images \
     --num_classes=200 \
-    --snapshot_dir=../snapshots/vgg_16_fpn_0_0_0_1 \
+    --snapshot_dir=../snapshots/vgg_16_fpn_cls_l5_loc_l4_s10_.2_.5 \
     --onehot=False \
     --debug \
-    --debug_dir=../debug/vgg_16_fpn_0_0_0_1 \
+    --debug_dir=../debug/vgg_16_fpn_cls_l5_loc_l4_s10_.2_.5 \
     --restore_from=cub_epoch_100_glo_step_20000.pth.tar \
-    --threshold=0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8 \
+    --threshold=0.8,0.9,0.92,0.94,0.96,0.98,0.99 \
     --current_epoch=100 \
     --loss_w_3=0. \
-    --loss_w_4=0. \
-    --loss_w_5=0. \
-    --loss_w_6=1. \
+    --loss_w_4=1. \
+    --loss_w_5=1. \
     --fpn \
+    --loc_branch \
