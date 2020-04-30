@@ -47,16 +47,23 @@ class VGG(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
+            nn.Conv2d(1024, 1, kernel_size=1, padding=0),
         )
         self.cls3 = nn.Sequential(
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(512, self.num_classes, kernel_size=1, padding=0),
+            nn.Conv2d(512, 1, kernel_size=1, padding=0),
         )
-
+        self.conv6 = nn.Sequential(
+            nn.Conv2d(512, 1024, 3, stride=2, padding=1)
+        )
+        self.cls6 = nn.Sequential(
+            nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
+        )
         # self.cls_4 = nn.Conv2d(128, self.num_classes, kernel_size=1, padding=0)
         # self.cls_5 = nn.Conv2d(128, self.num_classes, kernel_size=1, padding=0)
 
@@ -162,10 +169,9 @@ class VGG(nn.Module):
         feat_5 = self.conv5(feat_4)
         self.feat_5 = feat_5
         self.construct_fpn()
-        cls_map_3 = self.cls3(self.f3_2)
-        cls_map_4 = self.cls4(self.f4_2)
         cls_map_5 = self.cls5(self.f5_2)
-
+        cls_map_6 = self.cls6(self.f6_2)
+        cls_map_3 = cls_map_4 = None
         if self.args.loc_branch:
             if self.args.com_feat:
                 n,c,h,w = feat_3.size()
@@ -178,10 +184,12 @@ class VGG(nn.Module):
                 loc_map = self.loc(merge_feat)
                 self.loc_map = loc_map
             else:
-                loc_map = self.loc(feat_5)
-                self.loc_map = loc_map
+                cls_map_3 = self.cls3(self.f3_2)
+                cls_map_4 = self.cls4(self.f4_2)
+                # loc_map = self.loc(feat_5)
+                # self.loc_map = loc_map
 
-        return cls_map_3, cls_map_4, cls_map_5
+        return cls_map_3, cls_map_4, cls_map_5, cls_map_6
 
     def construct_fpn(self):
         if self.args.bifpn:
@@ -220,7 +228,7 @@ class VGG(nn.Module):
             self.f4_2 = self.fpn_out_4(lateral_4_conv) + f4_0
             f4_up = F.interpolate(lateral_4_conv, scale_factor=2, mode='bilinear', align_corners=True)
             self.f3_2 = self.fpn_out_3(self.fpn_lat_3(f3_0) + f4_up) + f3_0
-
+            self.f6_2 = self.conv6(self.f5_2)
 
     def non_local(self, feat, f_phi, f_theta,kernel=3):
         n, c, h, w = feat.size()
@@ -311,7 +319,7 @@ class VGG(nn.Module):
 
     def get_loss(self, logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, loc_start=10, erase_start=10):
 
-        logits_3, logits_4, logits_5 = logits
+        logits_3, logits_4, logits_5, logits_6 = logits
         if self.args.erase and epoch >= erase_start:
             n, c = logits_3.size()[:2]
             atten_map_3 = logits_3[torch.arange(n), gt_child_label.long(), ...]
@@ -331,21 +339,73 @@ class VGG(nn.Module):
             logits_4 = logits_4 * norm_atten_mask_3.detach()
             logits_5 = logits_5 * norm_atten_mask_4.detach()
 
-        cls_logits_3 = torch.mean(torch.mean(logits_3, dim=2), dim=2)
-        cls_logits_4 = torch.mean(torch.mean(logits_4, dim=2), dim=2)
+        # cls_logits_3 = torch.mean(torch.mean(logits_3, dim=2), dim=2)
+        # cls_logits_4 = torch.mean(torch.mean(logits_4, dim=2), dim=2)
         cls_logits_5 = torch.mean(torch.mean(logits_5, dim=2), dim=2)
+        cls_logits_6 = torch.mean(torch.mean(logits_6, dim=2), dim=2)
 
-        loss_3 = self.loss_cross_entropy(cls_logits_3, gt_child_label.long())
-        loss_4 = self.loss_cross_entropy(cls_logits_4, gt_child_label.long())
+        # loss_3 = self.loss_cross_entropy(cls_logits_3, gt_child_label.long())
+        # loss_4 = self.loss_cross_entropy(cls_logits_4, gt_child_label.long())
         loss_5 = self.loss_cross_entropy(cls_logits_5, gt_child_label.long())
-        loss = self.args.loss_w_3 * loss_3 + self.args.loss_w_4 * loss_4 + self.args.loss_w_5 * loss_5
+        loss_6 = self.loss_cross_entropy(cls_logits_6, gt_child_label.long())
+        loss = self.args.loss_w_5 * loss_5 + self.args.loss_w_6 * loss_6
 
         if self.args.loc_branch and epoch >= loc_start:
-            loc_loss = self.get_loc_loss(logits, gt_child_label, self.args.th_bg, self.args.th_fg)
+            # loc_loss = self.get_loc_loss(logits, gt_child_label, self.args.th_bg, self.args.th_fg)
+            loss_3, loss_4 = self.loc_loss_fpn(logits_3, logits_4, logits_5, gt_child_label)
+            loc_loss = self.args.loss_w_3 * loss_3 + self.args.loss_w_4 * loss_4
             loss += loc_loss
         else:
+            loss_4 = torch.zeros_like(loss)
+            loss_3 = torch.zeros_like(loss)
             loc_loss = torch.zeros_like(loss)
-        return loss, loss_3, loss_4, loss_5, loc_loss
+        return loss, loss_3, loss_4, loss_5, loss_6, loc_loss
+
+    def loc_loss_fpn(self, logits3, logits4, logits5, label, th_bg=0.2, th_fg=0.2):
+        # normalization
+        n, c, h3, w3 = logits3.size()
+        _, _, h4, w4 = logits4.size()
+
+        cls_logits = F.softmax(logits5, dim=1)
+        var_logits = torch.var(cls_logits, dim=1)
+        norm_var_logits = self.normalize_feat(var_logits)
+
+
+        fg_cls = cls_logits[torch.arange(n), label.long(), ...].clone()
+        fg_cls = self.normalize_feat(fg_cls)
+
+        norm_var_logits_3 = F.interpolate(norm_var_logits.unsqueeze(1), size=(h3, w3), mode='bilinear',
+                                        align_corners=True)
+        norm_var_logits_4 = F.interpolate(norm_var_logits.unsqueeze(1), size=(h4, w4), mode='bilinear',
+                                          align_corners=True)
+
+        norm_fg_cls_3 = F.interpolate(fg_cls.unsqueeze(1), size=(h3, w3), mode='bilinear', align_corners=True)
+        norm_fg_cls_4 = F.interpolate(fg_cls.unsqueeze(1), size=(h4, w4), mode='bilinear', align_corners=True)
+
+        cls_mask_4 = -1 * torch.ones_like(norm_var_logits_4)
+        cls_mask_4[norm_var_logits_4 < th_bg] = 0.
+        cls_mask_4[norm_fg_cls_4 > th_fg] = 1.
+
+        cls_mask_3 = -1 * torch.ones_like(norm_var_logits_3)
+        cls_mask_3[norm_var_logits_3 < th_bg] = 0.
+        cls_mask_3[norm_fg_cls_3 > th_fg] = 1.
+
+        bin_weight_4 = torch.ones_like(cls_mask_4)
+        bin_weight_4[cls_mask_4 < 0] = 0.
+
+        bin_weight_3 = torch.ones_like(cls_mask_3)
+        bin_weight_3[cls_mask_3 < 0] = 0.
+
+        bin_loss_4 = self.loss_bce(logits4, cls_mask_4, reduction='none')
+        bin_loss_4 = bin_loss_4 * bin_weight_4
+        bin_loss_4 = torch.sum(bin_loss_4) / torch.sum(bin_weight_4)
+
+        bin_loss_3 = self.loss_bce(logits3, cls_mask_3, reduction='none')
+        bin_loss_3 = bin_loss_3 * bin_weight_3
+        bin_loss_3 = torch.sum(bin_loss_3) / torch.sum(bin_weight_3)
+
+
+        return bin_loss_4, bin_loss_3
 
     def get_loc_loss(self, logits, gt_child_label, th_bg=0.3, th_fg=0.5):
         n, c, lh, lw = self.loc_map.size()

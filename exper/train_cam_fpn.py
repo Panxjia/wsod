@@ -122,9 +122,10 @@ class opts(object):
         self.parser.add_argument("--th_fg", type=float, default=0.5, help='the class threshold for fore ground.')
         self.parser.add_argument("--loc_start", type=float, default=10, help='the start epoch to add location loss.')
         self.parser.add_argument("--cls_start", type=float, default=120, help='the start epoch to modify classification using location prediction.')
-        self.parser.add_argument("--loss_w_3", type=float, default=1., help='weight of classification loss for 3-th level.')
-        self.parser.add_argument("--loss_w_4", type=float, default=1., help='weight of classification loss for 4-th level.')
-        self.parser.add_argument("--loss_w_5", type=float, default=1., help='weight of classification loss for 5-th level.')
+        self.parser.add_argument("--loss_w_3", type=float, default=0., help='weight of classification loss for 3-th level.')
+        self.parser.add_argument("--loss_w_4", type=float, default=0., help='weight of classification loss for 4-th level.')
+        self.parser.add_argument("--loss_w_5", type=float, default=0., help='weight of classification loss for 5-th level.')
+        self.parser.add_argument("--loss_w_6", type=float, default=0., help='weight of classification loss for 6-th level.')
         self.parser.add_argument("--erase_start", type=float, default=10, help='the start epoch to erase discriminal region.')
         self.parser.add_argument("--erase_th", type=float, default=0.2, help='the threshold to detemine the discriminal region.')
         self.parser.add_argument("--erase", action='store_true', help='switch on erasing strategy.')
@@ -154,7 +155,7 @@ def get_model(args):
 
 
     lr = args.lr
-    added_layers = ['cls', 'fpn', 'classifier'] if args.diff_lr == 'True' else []
+    added_layers = ['cls', 'fpn', 'conv6', 'classifier'] if args.diff_lr == 'True' else []
     weight_list = []
     bias_list = []
     added_weight_list = []
@@ -221,14 +222,13 @@ def train(args):
     losses = AverageMeter()
     losses_loc = AverageMeter()
     losses_f3 = AverageMeter()
-    top1_f3 = AverageMeter()
-    top5_f3 = AverageMeter()
     losses_f4 = AverageMeter()
-    top1_f4 = AverageMeter()
-    top5_f4 = AverageMeter()
     losses_f5 = AverageMeter()
     top1_f5 = AverageMeter()
     top5_f5 = AverageMeter()
+    losses_f6 = AverageMeter()
+    top1_f6 = AverageMeter()
+    top5_f6 = AverageMeter()
 
     protype_v = protype_h = None
     if args.sc:
@@ -258,15 +258,14 @@ def train(args):
         model.train()
         losses.reset()
         losses_loc.reset()
+        losses_f6.reset()
         losses_f5.reset()
         losses_f4.reset()
         losses_f3.reset()
+        top1_f6.reset()
+        top5_f6.reset()
         top1_f5.reset()
         top5_f5.reset()
-        top1_f4.reset()
-        top5_f4.reset()
-        top1_f3.reset()
-        top5_f3.reset()
 
         batch_time.reset()
         res = my_optim.reduce_lr(args, optimizer, current_epoch)
@@ -291,7 +290,7 @@ def train(args):
                 protype_v.update(child_map_v.detach(), child_label.long())
 
 
-            loss_val, loss_f3, loss_f4, loss_f5, loss_loc, = model.module.get_loss(logits,child_label,
+            loss_val, loss_f3, loss_f4, loss_f5, loss_f6, loss_loc, = model.module.get_loss(logits,child_label,
                     protype_h = protype_h, protype_v=protype_v, epoch=current_epoch,
                     loc_start=args.loc_start, erase_start=args.erase_start)
 
@@ -300,6 +299,7 @@ def train(args):
             writer.add_scalar('loss_f3', loss_f3, global_counter)
             writer.add_scalar('loss_f4', loss_f4, global_counter)
             writer.add_scalar('loss_f5', loss_f5, global_counter)
+            writer.add_scalar('loss_f6', loss_f6, global_counter)
             writer.add_scalar('loss_loc', loss_loc, global_counter)
 
             # network parameter update
@@ -311,26 +311,23 @@ def train(args):
                 loss_val.backward()
             optimizer.step()
 
-            logits3, logits4, logits5 = logits
-            cls_logits3 = torch.mean(torch.mean(logits3, dim=2), dim=2)
-            cls_logits4 = torch.mean(torch.mean(logits4, dim=2), dim=2)
+            logits3, logits4, logits5, logits6 = logits
             cls_logits5 = torch.mean(torch.mean(logits5, dim=2), dim=2)
+            cls_logits6 = torch.mean(torch.mean(logits6, dim=2), dim=2)
             if not args.onehot == 'True':
-                prec1_f3, prec5_f3 = evaluate.accuracy(cls_logits3.data, child_label.long(), topk=(1, 5))
-                top1_f3.update(prec1_f3[0], img.size()[0])
-                top5_f3.update(prec5_f3[0], img.size()[0])
-                prec1_f4, prec5_f4 = evaluate.accuracy(cls_logits4.data, child_label.long(), topk=(1, 5))
-                top1_f4.update(prec1_f4[0], img.size()[0])
-                top5_f4.update(prec5_f4[0], img.size()[0])
                 prec1_f5, prec5_f5 = evaluate.accuracy(cls_logits5.data, child_label.long(), topk=(1, 5))
                 top1_f5.update(prec1_f5[0], img.size()[0])
                 top5_f5.update(prec5_f5[0], img.size()[0])
+                prec1_f6, prec5_f6 = evaluate.accuracy(cls_logits6.data, child_label.long(), topk=(1, 5))
+                top1_f6.update(prec1_f6[0], img.size()[0])
+                top5_f6.update(prec5_f6[0], img.size()[0])
 
             losses.update(loss_val.data, img.size()[0])
             losses_loc.update(loss_loc.data, img.size()[0])
             losses_f3.update(loss_f3.data, img.size()[0])
             losses_f4.update(loss_f4.data, img.size()[0])
             losses_f5.update(loss_f5.data, img.size()[0])
+            losses_f6.update(loss_f6.data, img.size()[0])
 
             batch_time.update(time.time() - end)
 
@@ -351,22 +348,19 @@ def train(args):
                       'Loss3 {loss_f3.val:.4f} ({loss_f3.avg:.4f})\t'
                       'Loss4 {loss_f4.val:.4f} ({loss_f4.avg:.4f})\t'
                       'Loss5 {loss_f5.val:.4f} ({loss_f5.avg:.4f})\t'
-                      'Prec3@1 {top1_f3.val:.3f} ({top1_f3.avg:.3f})\t'
-                      'Prec3@5 {top5_f3.val:.3f} ({top5_f3.avg:.3f})\t'
-                      'Prec4@1 {top1_f4.val:.3f} ({top1_f4.avg:.3f})\t'
-                      'Prec4@5 {top5_f4.val:.3f} ({top5_f4.avg:.3f})\t'
+                      'Loss6 {loss_f6.val:.4f} ({loss_f6.avg:.4f})\t'
                       'Prec5@1 {top1_f5.val:.3f} ({top1_f5.avg:.3f})\t'
-                      'Prec5@5 {top5_f5.val:.3f} ({top5_f5.avg:.3f})\t'.format(
+                      'Prec5@5 {top5_f5.val:.3f} ({top5_f5.avg:.3f})\t'
+                      'Prec6@1 {top1_f6.val:.3f} ({top1_f6.avg:.3f})\t'
+                      'Prec6@5 {top5_f6.val:.3f} ({top5_f6.avg:.3f})\t'.format(
                     current_epoch, global_counter % len(train_loader), len(train_loader), batch_time=batch_time,
                     eta_str=eta_str, eta_str_epoch=eta_str_epoch, loss=losses, loss_loc=losses_loc, loss_f3=losses_f3,
-                    loss_f4=losses_f4, loss_f5=losses_f5, top1_f3=top1_f3, top5_f3=top5_f3, top1_f4=top1_f4, top5_f4=top5_f4,
-                    top1_f5=top1_f5, top5_f5=top5_f5))
-                writer.add_scalar('top1_f3', top1_f3.avg, global_counter)
-                writer.add_scalar('top5_f3', top5_f3.avg, global_counter)
-                writer.add_scalar('top1_f4', top1_f4.avg, global_counter)
-                writer.add_scalar('top5_f4', top5_f4.avg, global_counter)
+                    loss_f4=losses_f4, loss_f5=losses_f5, loss_f6=losses_f6, top1_f5=top1_f5, top5_f5=top5_f5,
+                    top1_f6=top1_f6, top5_f6=top5_f6))
                 writer.add_scalar('top1_f5', top1_f5.avg, global_counter)
                 writer.add_scalar('top5_f5', top5_f5.avg, global_counter)
+                writer.add_scalar('top1_f6', top1_f6.avg, global_counter)
+                writer.add_scalar('top5_f6', top5_f6.avg, global_counter)
 
 
         current_epoch += 1
@@ -383,22 +377,21 @@ def train(args):
                                      % (args.dataset, current_epoch, global_counter))
 
         with open(os.path.join(args.snapshot_dir, 'train_record.csv'), 'a') as fw:
-            fw.write('%d \t %.4f \t %.4f \t %.4f \t %.4f \t %.4f \t %.3f \t %.3f \t ''%.3f \t %.3f \t %.3f \t '
-                     '%.3f\n' % (current_epoch, losses.avg, losses_loc.avg, losses_f3.avg, losses_f4.avg,
-                                 losses_f5.avg, top1_f3.avg, top5_f3.avg, top1_f4.avg, top5_f4.avg, top1_f5.avg,
-                                 top5_f5.avg))
+            fw.write('%d \t %.4f \t %.4f \t %.4f \t %.4f \t %.4f \t %.4f \t %.3f \t %.3f \t ''%.3f \t %.3f'
+                     ' \n'%(current_epoch, losses.avg, losses_loc.avg, losses_f3.avg, losses_f4.avg,
+                                 losses_f5.avg, losses_f6.avg, top1_f5.avg,
+                                 top5_f5.avg, top1_f6.avg, top5_f6.avg))
 
         losses.reset()
         losses_loc.reset()
         losses_f3.reset()
         losses_f4.reset()
         losses_f5.reset()
-        top1_f3.reset()
-        top5_f3.reset()
-        top1_f4.reset()
-        top5_f4.reset()
+        losses_f6.reset()
         top1_f5.reset()
         top5_f5.reset()
+        top1_f6.reset()
+        top5_f6.reset()
 
 if __name__ == '__main__':
     args = opts().parse()

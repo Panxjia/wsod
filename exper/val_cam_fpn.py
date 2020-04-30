@@ -95,6 +95,7 @@ class opts(object):
         self.parser.add_argument("--loss_w_3", type=float, default=1., help='weight of classification loss for 3-th level.')
         self.parser.add_argument("--loss_w_4", type=float, default=1., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--loss_w_5", type=float, default=1., help='weight of classification loss for 5-th level.')
+        self.parser.add_argument("--loss_w_6", type=float, default=1., help='weight of classification loss for 6-th level.')
 
         self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
         self.parser.add_argument("--bifpn", action='store_true', help='switch on adopting bifpn architecture.')
@@ -326,12 +327,16 @@ def val(args):
         top5_f4_clsacc = AverageMeter()
         top1_f5_clsacc = AverageMeter()
         top5_f5_clsacc = AverageMeter()
+        top1_f6_clsacc = AverageMeter()
+        top5_f6_clsacc = AverageMeter()
         top1_f3_clsacc.reset()
         top5_f3_clsacc.reset()
         top1_f4_clsacc.reset()
         top5_f4_clsacc.reset()
         top1_f5_clsacc.reset()
         top5_f5_clsacc.reset()
+        top1_f6_clsacc.reset()
+        top5_f6_clsacc.reset()
 
     loc_err = {}
     if args.com_feat:
@@ -370,6 +375,14 @@ def val(args):
             loc_err['top1_f5_deterr_{}'.format(th)].reset()
             loc_err['top5_f5_deterr_{}'.format(th)] = AverageMeter()
             loc_err['top5_f5_deterr_{}'.format(th)].reset()
+            loc_err['top1_f6_locerr_{}'.format(th)] = AverageMeter()
+            loc_err['top1_f6_locerr_{}'.format(th)].reset()
+            loc_err['top5_f6_locerr_{}'.format(th)] = AverageMeter()
+            loc_err['top5_f6_locerr_{}'.format(th)].reset()
+            loc_err['top1_f6_deterr_{}'.format(th)] = AverageMeter()
+            loc_err['top1_f6_deterr_{}'.format(th)].reset()
+            loc_err['top5_f6_deterr_{}'.format(th)] = AverageMeter()
+            loc_err['top5_f6_deterr_{}'.format(th)].reset()
 
     # get model
     model = get_model(args)
@@ -421,18 +434,21 @@ def val(args):
             continue
         logits = model(img)
 
-        logits3, logits4, logits5 = logits
+        logits3, logits4, logits5, logits6 = logits
         cls_logits_3 = torch.mean(torch.mean(logits3, dim=2), dim=2)
         cls_logits_4 = torch.mean(torch.mean(logits4, dim=2), dim=2)
         cls_logits_5 = torch.mean(torch.mean(logits5, dim=2), dim=2)
+        cls_logits_6 = torch.mean(torch.mean(logits6, dim=2), dim=2)
 
         cls_logits_3 = F.softmax(cls_logits_3, dim=1)
         cls_logits_4 = F.softmax(cls_logits_4, dim=1)
         cls_logits_5 = F.softmax(cls_logits_5, dim=1)
+        cls_logits_6 = F.softmax(cls_logits_6, dim=1)
         if args.tencrop == 'True':
             cls_logits_3 = cls_logits_3.view(1, ncrops, -1).mean(1)
             cls_logits_4 = cls_logits_4.view(1, ncrops, -1).mean(1)
             cls_logits_5 = cls_logits_5.view(1, ncrops, -1).mean(1)
+            cls_logits_6 = cls_logits_6.view(1, ncrops, -1).mean(1)
 
         if args.com_feat:
             cls_logits_com = torch.cat((cls_logits_3, cls_logits_4, cls_logits_5), dim=0)
@@ -450,11 +466,14 @@ def val(args):
             prec1_f5, prec5_f5 = evaluate.accuracy(cls_logits_5.cpu().data, label_in.long(), topk=(1, 5))
             top1_f5_clsacc.update(prec1_f5[0].numpy(), img.size()[0])
             top5_f5_clsacc.update(prec5_f5[0].numpy(), img.size()[0])
+            prec1_f6, prec5_f6 = evaluate.accuracy(cls_logits_6.cpu().data, label_in.long(), topk=(1, 5))
+            top1_f6_clsacc.update(prec1_f6[0].numpy(), img.size()[0])
+            top5_f6_clsacc.update(prec5_f6[0].numpy(), img.size()[0])
 
 
 
         _, img_loc, label = dat_loc
-        cls_map_3, cls_map_4, cls_map_5= model(img_loc)
+        cls_map_3, cls_map_4, cls_map_5, cls_map_6= model(img_loc)
 
         if args.loc_branch:
             pass
@@ -515,7 +534,7 @@ def val(args):
                                             gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv4')
             if args.loss_w_5 >0.:
                 for th in args.threshold:
-                    deterr_1, locerr_1, deterr_5, locerr_5, top_maps, top5_boxes = eval_loc(cls_logits_5, cls_map_3,
+                    deterr_1, locerr_1, deterr_5, locerr_5, top_maps, top5_boxes = eval_loc(cls_logits_5, cls_map_5,
                                                     img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
                                                     topk=(1, 5), threshold=th, mode='union', debug=args.debug,
                                                     debug_dir=args.debug_dir, NoHDA=True, bin_map = args.loc_branch)
@@ -526,16 +545,35 @@ def val(args):
                     if args.debug and idx in show_idxs:
                         save_im_heatmap_box(img_path[0], top_maps, top5_boxes, args.debug_dir,
                                             gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
-                                            gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv5_3')
+                                            gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv5')
+            if args.loss_w_6 >0.:
+                for th in args.threshold:
+                    deterr_1, locerr_1, deterr_5, locerr_5, top_maps, top5_boxes = eval_loc(cls_logits_6, cls_map_6,
+                                                    img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
+                                                    topk=(1, 5), threshold=th, mode='union', debug=args.debug,
+                                                    debug_dir=args.debug_dir, NoHDA=True, bin_map = args.loc_branch)
+                    loc_err['top1_f6_deterr_{}'.format(th)].update(deterr_1, img.size()[0])
+                    loc_err['top5_f6_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
+                    loc_err['top1_f6_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
+                    loc_err['top5_f6_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
+                    if args.debug and idx in show_idxs:
+                        save_im_heatmap_box(img_path[0], top_maps, top5_boxes, args.debug_dir,
+                                            gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
+                                            gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv6')
 
     print('== cls err')
     if args.com_feat:
         print('Top1_com: {:.2f} Top5_com: {:.2f}\n'.format(100.0 - top1_com_clsacc.avg, 100.0 - top5_com_clsacc.avg))
 
     else:
-        print('Top1_f3: {:.2f} Top5_f3: {:.2f}\n'.format(100.0 - top1_f3_clsacc.avg, 100.0 - top5_f3_clsacc.avg))
-        print('Top1_f4: {:.2f} Top5_f4: {:.2f}\n'.format(100.0 - top1_f4_clsacc.avg, 100.0 - top5_f4_clsacc.avg))
-        print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_f5_clsacc.avg, 100.0 - top5_f5_clsacc.avg))
+        if args.loss_w_3 > 0:
+            print('Top1_f3: {:.2f} Top5_f3: {:.2f}\n'.format(100.0 - top1_f3_clsacc.avg, 100.0 - top5_f3_clsacc.avg))
+        if args.loss_w_4 > 0:
+            print('Top1_f4: {:.2f} Top5_f4: {:.2f}\n'.format(100.0 - top1_f4_clsacc.avg, 100.0 - top5_f4_clsacc.avg))
+        if args.loss_w_5 > 0:
+            print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_f5_clsacc.avg, 100.0 - top5_f5_clsacc.avg))
+        if args.loss_w_6 > 0:
+            print('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(100.0 - top1_f6_clsacc.avg, 100.0 - top5_f6_clsacc.avg))
 
     if args.com_feat:
         for th in args.threshold:
@@ -570,6 +608,13 @@ def val(args):
                 print('== loc err ')
                 print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_locerr_{}'.format(th)].avg,
                                                                     loc_err['top5_f5_locerr_{}'.format(th)].avg))
+            if args.loss_w_6 > 0:
+                print('== det err')
+                print('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(loc_err['top1_f6_deterr_{}'.format(th)].avg,
+                                                                    loc_err['top5_f6_deterr_{}'.format(th)].avg))
+                print('== loc err ')
+                print('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(loc_err['top1_f6_locerr_{}'.format(th)].avg,
+                                                                    loc_err['top5_f6_locerr_{}'.format(th)].avg))
 
     result_log = os.path.join(args.snapshot_dir, 'results.log')
 
@@ -582,6 +627,7 @@ def val(args):
             fw.write('Top1_f3: {:.2f} Top5_f3: {:.2f}\n'.format(100.0 - top1_f3_clsacc.avg, 100.0 - top5_f3_clsacc.avg))
             fw.write('Top1_f4: {:.2f} Top5_f4: {:.2f}\n'.format(100.0 - top1_f4_clsacc.avg, 100.0 - top5_f4_clsacc.avg))
             fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_f5_clsacc.avg, 100.0 - top5_f5_clsacc.avg))
+            fw.write('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(100.0 - top1_f6_clsacc.avg, 100.0 - top5_f6_clsacc.avg))
         for th in args.threshold:
             fw.write('=========== threshold: {} ===========\n'.format(th))
             if args.com_feat:
@@ -613,6 +659,13 @@ def val(args):
                     fw.write('== loc err ')
                     fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_locerr_{}'.format(th)].avg,
                                                                loc_err['top5_f5_locerr_{}'.format(th)].avg))
+                if args.loss_w_6 >0:
+                    fw.write('== det err')
+                    fw.write('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(loc_err['top1_f6_deterr_{}'.format(th)].avg,
+                                                                     loc_err['top5_f6_deterr_{}'.format(th)].avg))
+                    fw.write('== loc err ')
+                    fw.write('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(loc_err['top1_f6_locerr_{}'.format(th)].avg,
+                                                               loc_err['top5_f6_locerr_{}'.format(th)].avg))
 
 
 if __name__ == '__main__':
