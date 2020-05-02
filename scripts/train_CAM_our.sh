@@ -14,9 +14,13 @@ python train_cam_our.py \
     --resume=False \
     --pretrained_model=vgg16.pth \
     --seed=0 \
-    --snapshot_dir=../snapshots/vgg_16_baseline_7_rep1 \
-    --log_dir=../log/vgg_16_baseline_7_rep1  \
+    --snapshot_dir=../snapshots/vgg_16_loc_.2_.5_s10\
+    --log_dir=../log/vgg_16_loc_.2_.5_s10  \
     --onehot=False \
     --decay_point=80 \
     --mce \
+    --loc_branch \
+    --loc_start=10 \
+    --th_bg=0.2 \
+    --th_fg=0.5 \
 

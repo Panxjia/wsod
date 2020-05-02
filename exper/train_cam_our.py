@@ -118,10 +118,10 @@ class opts(object):
         self.parser.add_argument("--sep_loss", action='store_true', help='switch on calculating loss for each individual.')
         self.parser.add_argument("--loc_branch", action='store_true', help='switch on location branch.')
         self.parser.add_argument("--com_feat", action='store_true', help='switch on location branch.')
-        self.parser.add_argument("--th_bg", type=float, default=0.3, help='the variance threshold for back ground.')
+        self.parser.add_argument("--th_bg", type=float, default=0.2, help='the variance threshold for back ground.')
         self.parser.add_argument("--th_fg", type=float, default=0.5, help='the class threshold for fore ground.')
         self.parser.add_argument("--loc_start", type=float, default=10, help='the start epoch to add location loss.')
-        self.parser.add_argument("--cls_start", type=float, default=20, help='the start epoch to modify classification using location prediction.')
+        self.parser.add_argument("--cls_start", type=float, default=120, help='the start epoch to modify classification using location prediction.')
 
     def parse(self):
         opt = self.parser.parse_args()

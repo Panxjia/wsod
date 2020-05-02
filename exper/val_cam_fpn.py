@@ -96,6 +96,7 @@ class opts(object):
         self.parser.add_argument("--loss_w_4", type=float, default=1., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--loss_w_5", type=float, default=1., help='weight of classification loss for 5-th level.')
         self.parser.add_argument("--loss_w_6", type=float, default=1., help='weight of classification loss for 6-th level.')
+        self.parser.add_argument("--vis_th", type=float, default=0.9, help='threshold for visualizatoin')
         self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
         self.parser.add_argument("--bifpn", action='store_true', help='switch on adopting bifpn architecture.')
 
@@ -204,10 +205,10 @@ def vis_var(feat, cls_logits, img_path, vis_path, net='vgg_baseline'):
 
     im = cv2.imread(img_path)
     h, w, _ = np.shape(im)
-    resized_var_no_white = cv2.resize(norm_var_no_white, (w, h))
-    resized_cls_no_white = cv2.resize(norm_cls_no_white, (w, h))
-    resized_var = cv2.resize(norm_var, (w, h))
-    resized_cls= cv2.resize(norm_cls, (w, h))
+    resized_var_no_white = cv2.resize(norm_var_no_white, (w, h)) <0.7
+    resized_cls_no_white = cv2.resize(norm_cls_no_white, (w, h)) >0.2
+    resized_var = cv2.resize(norm_var, (w, h)) <0.2
+    resized_cls= cv2.resize(norm_cls, (w, h)) >0.5
 
     draw_im = 255 * np.ones((h + 15, w+5, 3), np.uint8)
     draw_im[:h, :w, :] = im
@@ -359,7 +360,7 @@ def val(args):
         np.random.seed(2333)
         show_idxs = np.arange(len(valcls_loader))
         np.random.shuffle(show_idxs)
-        show_idxs = show_idxs[:50]
+        show_idxs = show_idxs[:100]
 
     # evaluation classification task
 
@@ -387,9 +388,9 @@ def val(args):
             if idx in show_idxs:
                 _, img_loc, label = dat_loc
                 logits = model(img_loc)
-                cls_logits = F.softmax(logits,dim=1)
+                cls_logits = F.softmax(logits[2],dim=1)
                 var_logits = torch.var(cls_logits,dim=1).squeeze()
-                vis_var(var_logits, cls_logits[0,label.long(),...], img_path[0], args.vis_dir, net='vgg_baseline_var_cls')
+                vis_var(var_logits, cls_logits[0,label.long(),...], img_path[0], args.vis_dir, net='vis_var_vgg_16_fpn_l5_1_100e_7_2')
             continue
         logits = model(img)
 
@@ -421,6 +422,7 @@ def val(args):
             # bg_map = norm_atten_map(bg_map)
 
         if args.loss_w_3 >0.:
+            cls_map_3 = torch.sigmoid(cls_map_3)
             for th in args.threshold:
                 deterr_1, locerr_1, deterr_5, locerr_5, top_maps, top5_boxes = eval_loc(cls_logits_5, cls_map_3,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
@@ -430,11 +432,12 @@ def val(args):
                 loc_err['top5_f3_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
                 loc_err['top1_f3_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
                 loc_err['top5_f3_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
-                if args.debug and idx in show_idxs:
+                if args.debug and idx in show_idxs and th == args.vis_th:
                     save_im_heatmap_box(img_path[0], top_maps, top5_boxes, args.debug_dir,
                                         gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv3')
         if args.loss_w_4 >0.:
+            cls_map_4 = torch.sigmoid(cls_map_4)
             for th in args.threshold:
                 deterr_1, locerr_1, deterr_5, locerr_5, top_maps, top5_boxes = eval_loc(cls_logits_5, cls_map_4,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
@@ -444,7 +447,7 @@ def val(args):
                 loc_err['top5_f4_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
                 loc_err['top1_f4_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
                 loc_err['top5_f4_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
-                if args.debug and idx in show_idxs:
+                if args.debug and idx in show_idxs and th == args.vis_th:
                     save_im_heatmap_box(img_path[0], top_maps, top5_boxes, args.debug_dir,
                                         gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv4')

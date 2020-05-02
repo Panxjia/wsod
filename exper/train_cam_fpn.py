@@ -364,7 +364,7 @@ def train(args):
 
 
         current_epoch += 1
-        if current_epoch % 50 == 0:
+        if current_epoch % 10 == 0:
             save_checkpoint(args,
                             {
                                 'epoch': current_epoch,

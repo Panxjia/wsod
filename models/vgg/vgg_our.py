@@ -31,7 +31,7 @@ class VGG(nn.Module):
         self.conv3 = nn.Sequential(*features[cnvs[0]:cnvs[1]])
         self.conv4 = nn.Sequential(*features[cnvs[1]:cnvs[2]])
         # self.conv1_4 = nn.Sequential(*features[:-5])
-        self.conv5 = nn.Sequential(*features[cnvs[2]:])
+        self.conv5 = nn.Sequential(*features[cnvs[2]:-1])
         self.fmp = features[-1]  # final max pooling
         self.num_classes = num_classes
         self.args = args
@@ -323,10 +323,10 @@ class VGG(nn.Module):
         norm_fg_cls = F.interpolate(fg_cls.unsqueeze(1),size=(lh,lw), mode='bilinear', align_corners=True)
         # norm_fg_cls = norm_fg_cls.squeeze()
 
-        norm_cls = (norm_var_logits + norm_fg_cls) * 0.5
+        # norm_cls = (norm_var_logits + norm_fg_cls) * 0.5
         cls_mask = -1 * torch.ones_like(norm_var_logits)
-        cls_mask[norm_cls < th_bg] = 0.
-        cls_mask[norm_cls > th_fg] = 1.
+        cls_mask[norm_var_logits < th_bg] = 0.
+        cls_mask[norm_fg_cls > th_fg] = 1.
 
         if self.args.avg_bin:
             cls_mask = F.max_pool2d(cls_mask, kernel_size=self.args.avg_size, stride=self.args.avg_stride)

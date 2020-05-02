@@ -163,14 +163,11 @@ class VGG(nn.Module):
     def forward(self, x):
         x = self.conv1_2(x)
         feat_3 = self.conv3(x)
-        self.feat_3 = feat_3
         feat_4 = self.conv4(feat_3)
-        self.feat_4 = feat_4
         feat_5 = self.conv5(feat_4)
-        self.feat_5 = feat_5
-        self.construct_fpn()
-        cls_map_5 = self.cls5(self.f5_2)
-        cls_map_6 = self.cls6(self.f6_2)
+        f3_2, f4_2, f5_2, f6_2 = self.construct_fpn(feat_3, feat_4, feat_5)
+        cls_map_5 = self.cls5(f5_2)
+        cls_map_6 = self.cls6(f6_2)
         cls_map_3 = cls_map_4 = None
         if self.args.loc_branch:
             if self.args.com_feat:
@@ -184,14 +181,15 @@ class VGG(nn.Module):
                 loc_map = self.loc(merge_feat)
                 self.loc_map = loc_map
             else:
-                cls_map_3 = self.cls3(self.f3_2)
-                cls_map_4 = self.cls4(self.f4_2)
+                cls_map_3 = self.cls3(f3_2)
+                cls_map_4 = self.cls4(f4_2)
                 # loc_map = self.loc(feat_5)
                 # self.loc_map = loc_map
 
         return cls_map_3, cls_map_4, cls_map_5, cls_map_6
 
-    def construct_fpn(self):
+    def construct_fpn(self, f3_0, f4_0, f5_0):
+        f3_2 = f4_2 = f5_2 = f6_2 = None
         if self.args.bifpn:
             """
             F5_0  ------------------------> F5_2 ------>
@@ -205,7 +203,6 @@ class VGG(nn.Module):
     
             """
 
-            f5_0, f4_0, f3_0 = self.feat_5, self.feat_4, self.feat_3
             f5_0_41 = self.fpn_f5_0_41(f5_0)
             self.fpn_f5_0_41_up = F.interpolate(f5_0_41, scale_factor=2, mode='bilinear', align_corners=True)
 
@@ -216,19 +213,20 @@ class VGG(nn.Module):
             f4_2 = self.fpn_mix4_2(self.fpn_f4_0_2(f4_0) + self.fpn_f4_1_2(f4_1) + self.fpn_f3_2_down(f3_2) )
             f5_2 = self.fpn_mix5_2(self.fpn_f5_0_2(f5_0)+self.fpn_f4_2_down(f4_2))
 
-            self.f3_2 = f3_2
-            self.f4_2 = f4_2
-            self.f5_2 = f5_2
-        if self.args.fpn:
-            f5_0, f4_0, f3_0 = self.feat_5, self.feat_4, self.feat_3
+        elif self.args.fpn:
             lateral_5_conv = self.fpn_lat_5(f5_0)
-            self.f5_2 = self.fpn_out_5(lateral_5_conv) + f5_0
+            f5_2 = self.fpn_out_5(lateral_5_conv)
             f5_up = F.interpolate(lateral_5_conv, scale_factor=2, mode='bilinear', align_corners=True)
             lateral_4_conv = self.fpn_lat_4(f4_0) + f5_up
-            self.f4_2 = self.fpn_out_4(lateral_4_conv) + f4_0
+            f4_2 = self.fpn_out_4(lateral_4_conv)
             f4_up = F.interpolate(lateral_4_conv, scale_factor=2, mode='bilinear', align_corners=True)
-            self.f3_2 = self.fpn_out_3(self.fpn_lat_3(f3_0) + f4_up) + f3_0
-            self.f6_2 = self.conv6(self.f5_2)
+            f3_2 = self.fpn_out_3(self.fpn_lat_3(f3_0) + f4_up)
+            f6_2 = self.conv6(f5_2)
+        else:
+            pass
+
+        return f3_2, f4_2, f5_2, f6_2
+
 
     def non_local(self, feat, f_phi, f_theta,kernel=3):
         n, c, h, w = feat.size()
@@ -361,7 +359,7 @@ class VGG(nn.Module):
             loc_loss = torch.zeros_like(loss)
         return loss, loss_3, loss_4, loss_5, loss_6, loc_loss
 
-    def loc_loss_fpn(self, logits3, logits4, logits5, label, th_bg=0.2, th_fg=0.2):
+    def loc_loss_fpn(self, logits3, logits4, logits5, label, th_bg=0.2, th_fg=0.5):
         # normalization
         n, c, h3, w3 = logits3.size()
         _, _, h4, w4 = logits4.size()
@@ -405,7 +403,7 @@ class VGG(nn.Module):
         bin_loss_3 = torch.sum(bin_loss_3) / torch.sum(bin_weight_3)
 
 
-        return bin_loss_4, bin_loss_3
+        return bin_loss_3, bin_loss_4
 
     def get_loc_loss(self, logits, gt_child_label, th_bg=0.3, th_fg=0.5):
         n, c, lh, lw = self.loc_map.size()
@@ -482,12 +480,9 @@ class VGG(nn.Module):
         pass
 
     def normalize_feat(self,feat):
-        n, fh, fw = feat.size()
-        feat = feat.view(n, -1)
-        min_val, _ = torch.min(feat, dim=-1, keepdim=True)
-        max_val, _ = torch.max(feat, dim=-1, keepdim=True)
+        min_val, _ = torch.min(torch.min(feat, dim=-1, keepdim=True)[0], dim=-1, keepdim=True)
+        max_val, _ = torch.max(torch.max(feat, dim=-1, keepdim=True)[0], dim=-1, keepdim=True)
         norm_feat = (feat - min_val) / (max_val - min_val + 1e-15)
-        norm_feat = norm_feat.view(n, fh, fw)
 
         return norm_feat
 

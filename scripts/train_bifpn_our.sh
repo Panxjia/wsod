@@ -14,18 +14,17 @@ python train_cam_fpn.py \
     --resume=False \
     --pretrained_model=vgg16.pth \
     --seed=0 \
-    --snapshot_dir=../snapshots/vgg_16_fpn_cls_l5_loc_l3_l4_s10_.2_.5 \
-    --log_dir=../log/vgg_16_fpn_cls_l5_loc_l3_l4_s10_.2_.5 \
+    --snapshot_dir=../snapshots/vgg_16_fpn_cls_l5_1_loc_l4_1_s10_.7_.5 \
+    --log_dir=../log/vgg_16_fpn_cls_l5_1_loc_l4_1_s10_.7_.5 \
     --onehot=False \
     --decay_point=80 \
     --mce \
-    --loss_w_3=1. \
     --loss_w_4=1. \
     --loss_w_5=1. \
     --fpn \
     --loc_branch \
     --loc_start=10 \
-    --th_bg=0.2 \
+    --th_bg=0.7 \
     --th_fg=0.5 \
 
 
