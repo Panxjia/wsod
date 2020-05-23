@@ -31,31 +31,34 @@ class VGG(nn.Module):
         self.conv3 = nn.Sequential(*features[cnvs[0]:cnvs[1]])
         self.conv4 = nn.Sequential(*features[cnvs[1]:cnvs[2]])
         # self.conv1_4 = nn.Sequential(*features[:-5])
-        self.conv5 = nn.Sequential(*features[cnvs[2]:])
+        self.conv5 = nn.Sequential(*features[cnvs[2]:-1])
         self.num_classes = num_classes
         self.args = args
 
         self.cls5 = nn.Sequential(
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1),
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
+            nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
         )
+
         self.cls4 = nn.Sequential(
             nn.Conv2d(512, 1024, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(1024, 1024, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(1024, 1, kernel_size=1, padding=0),
+            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0),
+
         )
         self.cls3 = nn.Sequential(
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(512, 1, kernel_size=1, padding=0),
+            nn.Conv2d(512, self.num_classes, kernel_size=1, padding=0),
         )
+
         self.conv6 = nn.Sequential(
             nn.Conv2d(512, 1024, 3, stride=2, padding=1)
         )
@@ -120,12 +123,19 @@ class VGG(nn.Module):
 
         if self.args.loc_branch:
             self.loc = nn.Sequential(
-                nn.Conv2d(128, 512, kernel_size=3, padding=1, dilation=1),  # fc6
+                nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),  # fc6
                 nn.ReLU(True),
-                nn.Conv2d(512, 512, kernel_size=3, padding=1, dilation=1),  # fc7
+                nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1),  # fc7
                 nn.ReLU(True),
-                nn.Conv2d(512, 1, kernel_size=1, padding=0)
+                nn.Conv2d(1024, 1, kernel_size=1, padding=0)
             )
+            # self.loc = nn.Sequential(
+            #     nn.Conv2d(256, 512, kernel_size=3, padding=1, dilation=1),  # fc6
+            #     nn.ReLU(True),
+            #     nn.Conv2d(512, 512, kernel_size=3, padding=1, dilation=1),  # fc7
+            #     nn.ReLU(True),
+            #     nn.Conv2d(512, 1, kernel_size=1, padding=0)
+            # )
             # self.loc = nn.Sequential(
             #     nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),  # fc6
             #     nn.ReLU(True),
@@ -165,28 +175,17 @@ class VGG(nn.Module):
         feat_3 = self.conv3(x)
         feat_4 = self.conv4(feat_3)
         feat_5 = self.conv5(feat_4)
-        f3_2, f4_2, f5_2, f6_2 = self.construct_fpn(feat_3, feat_4, feat_5)
-        cls_map_5 = self.cls5(f5_2)
-        cls_map_6 = self.cls6(f6_2)
-        cls_map_3 = cls_map_4 = None
+        # f3_2, f4_2, f5_2, f6_2 = self.construct_fpn(feat_3, feat_4, feat_5)
+        # cls_map_3 = self.cls3(feat_3)
+        # cls_map_4 = self.cls4(feat_4)
+        cls_map_5 = self.cls5(feat_5)
+        # cls_map_6 = self.cls6(f6_2)
+        # cls_map_3 = cls_map_4 = None
         if self.args.loc_branch:
-            if self.args.com_feat:
-                n,c,h,w = feat_3.size()
-                feat_45 = self.conv45(feat_4)
-                feat_45 = F.interpolate(feat_45,size=(h,w),mode='bilinear', align_corners=True)
-                feat_55 = self.conv55(feat_5)
-                feat_55 = F.interpolate(feat_55,size=(h,w),mode='bilinear', align_corners=True)
-                feat_35 = self.conv35(feat_3)
-                merge_feat = self.merge(feat_45+ feat_55+ feat_35)
-                loc_map = self.loc(merge_feat)
-                self.loc_map = loc_map
-            else:
-                cls_map_3 = self.cls3(f3_2)
-                cls_map_4 = self.cls4(f4_2)
-                # loc_map = self.loc(feat_5)
-                # self.loc_map = loc_map
+            loc_map = self.loc(feat_5)
+            self.loc_map = loc_map
 
-        return cls_map_3, cls_map_4, cls_map_5, cls_map_6
+        return cls_map_5, cls_map_5, cls_map_5, cls_map_5
 
     def construct_fpn(self, f3_0, f4_0, f5_0):
         f3_2 = f4_2 = f5_2 = f6_2 = None
@@ -214,12 +213,14 @@ class VGG(nn.Module):
             f5_2 = self.fpn_mix5_2(self.fpn_f5_0_2(f5_0)+self.fpn_f4_2_down(f4_2))
 
         elif self.args.fpn:
+            h3, w3 = f3_0.size()[2:]
+            h4, w4 = f4_0.size()[2:]
             lateral_5_conv = self.fpn_lat_5(f5_0)
             f5_2 = self.fpn_out_5(lateral_5_conv)
-            f5_up = F.interpolate(lateral_5_conv, scale_factor=2, mode='bilinear', align_corners=True)
+            f5_up = F.interpolate(lateral_5_conv, size=(h4,w4), mode='bilinear', align_corners=True)
             lateral_4_conv = self.fpn_lat_4(f4_0) + f5_up
             f4_2 = self.fpn_out_4(lateral_4_conv)
-            f4_up = F.interpolate(lateral_4_conv, scale_factor=2, mode='bilinear', align_corners=True)
+            f4_up = F.interpolate(lateral_4_conv, size=(h3,w3), mode='bilinear', align_corners=True)
             f3_2 = self.fpn_out_3(self.fpn_lat_3(f3_0) + f4_up)
             f6_2 = self.conv6(f5_2)
         else:
@@ -318,44 +319,105 @@ class VGG(nn.Module):
     def get_loss(self, logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, loc_start=10, erase_start=10):
 
         logits_3, logits_4, logits_5, logits_6 = logits
+        loc_logits_3 = logits_3
+        loc_logits_4 = logits_4
+        loc_logits_5 = logits_5
         if self.args.erase and epoch >= erase_start:
-            n, c = logits_3.size()[:2]
-            atten_map_3 = logits_3[torch.arange(n), gt_child_label.long(), ...]
+            # 111
+            # n, c = logits_3.size()[:2]
+            # atten_map_3 = logits_3[torch.arange(n), gt_child_label.long(), ...]
+            # atten_map_4 = logits_4[torch.arange(n), gt_child_label.long(), ...]
+            #
+            # norm_atten_map_3 = self.norm_atten_map(atten_map_3.clone())
+            # norm_atten_map_4 = self.norm_atten_map(atten_map_4.clone())
+            #
+            # norm_atten_mask_3 = norm_atten_map_3 < self.args.erase_th
+            # norm_atten_mask_3 = norm_atten_mask_3.float().unsqueeze(1).repeat(1,c,1,1)
+            # norm_atten_mask_4 = norm_atten_map_4 < self.args.erase_th
+            # norm_atten_mask_4 = norm_atten_mask_4.float().unsqueeze(1).repeat(1,c,1,1)
+            #
+            # norm_atten_mask_3 = F.max_pool2d(norm_atten_mask_3, kernel_size=2, stride=2)
+            # norm_atten_mask_4 = F.max_pool2d(norm_atten_mask_4, kernel_size=2, stride=2)
+            #
+            # logits_4 = logits_4 * norm_atten_mask_3.detach()
+            # logits_5 = logits_5 * norm_atten_mask_4.detach()
+
+            # 222 bottom up
+            # n, c = logits_3.size()[:2]
+            # atten_map_3 = logits_3[torch.arange(n), gt_child_label.long(), ...]
+            # norm_atten_map_3 = self.norm_atten_map(atten_map_3.clone())
+            # norm_atten_mask_3 = norm_atten_map_3 < self.args.erase_th
+            # norm_atten_mask_3 = norm_atten_mask_3.float().unsqueeze(1).repeat(1, c, 1, 1)
+            # norm_atten_mask_3 = F.max_pool2d(norm_atten_mask_3, kernel_size=2, stride=2)
+            # logits_4 = logits_4 * norm_atten_mask_3.detach()
+            #
+            # atten_map_4 = logits_4[torch.arange(n), gt_child_label.long(), ...]
+            # norm_atten_map_4 = self.norm_atten_map(atten_map_4.clone())
+            # norm_atten_mask_4 = norm_atten_map_4 < self.args.erase_th
+            # norm_atten_mask_4 = norm_atten_mask_4.float().unsqueeze(1).repeat(1, c, 1, 1)
+            # norm_atten_mask_4 = F.max_pool2d(norm_atten_mask_4, kernel_size=2, stride=2)
+            # logits_5 = logits_5 * norm_atten_mask_4.detach()
+
+            # add negative sample
+            # cls_logits_3 = F.softmax(logits_3, dim=1)
+            # var_logits_3 = torch.var(cls_logits_3, dim=1).squeeze()
+            # norm_var_logits_3 = self.norm_atten_map(var_logits_3)
+            # neg_mask_3 = norm_var_logits_3 < self.args.th_bg
+            # neg_mask_3 = neg_mask_3.float().unsqueeze(1).repeat(1,c,1,1)
+            # neg_mask_4 = F.max_pool2d(neg_mask_3, kernel_size=2, stride=2)
+            # neg_mask_5 = F.max_pool2d(neg_mask_3, kernel_size=4, stride=4)
+            # logits_4 = logits_4 * neg_mask_4.detach()
+            # logits_5 = logits_5 * neg_mask_5.detach()
+
+            # 333 top-down
+            n, c, h3, w3 = logits_3.size()
+            n, c, h4, w4 = logits_4.size()
+            atten_map_5 = logits_5[torch.arange(n), gt_child_label.long(), ...]
+            norm_atten_map_5 = self.norm_atten_map(atten_map_5.clone())
+            norm_atten_mask_5 = norm_atten_map_5 < self.args.erase_th_l5
+            norm_atten_mask_5 = norm_atten_mask_5.float().unsqueeze(1).repeat(1, c, 1, 1)
+            norm_atten_mask_5 = F.interpolate(norm_atten_mask_5, size=(h4,w4), mode='nearest')
+            logits_4 = logits_4 * norm_atten_mask_5.detach()
+
             atten_map_4 = logits_4[torch.arange(n), gt_child_label.long(), ...]
-
-            norm_atten_map_3 = self.norm_atten_map(atten_map_3.clone())
             norm_atten_map_4 = self.norm_atten_map(atten_map_4.clone())
+            norm_atten_mask_4 = norm_atten_map_4 < self.args.erase_th_l4
+            norm_atten_mask_4 = norm_atten_mask_4.float().unsqueeze(1).repeat(1, c, 1, 1)
+            norm_atten_mask_4 = F.interpolate(norm_atten_mask_4, size=(h3,w3), mode='nearest')
+            logits_3 = logits_3 * norm_atten_mask_4.detach()
 
-            norm_atten_mask_3 = norm_atten_map_3 < self.args.erase_th
-            norm_atten_mask_3 = norm_atten_mask_3.float().unsqueeze(1).repeat(1,c,1,1)
-            norm_atten_mask_4 = norm_atten_map_4 < self.args.erase_th
-            norm_atten_mask_4 = norm_atten_mask_4.float().unsqueeze(1).repeat(1,c,1,1)
+            # add negative
+            # cls_logits_5 = F.softmax(logits_5, dim=1)
+            # var_logits_5 = torch.var(cls_logits_5, dim=1).squeeze()
+            # norm_var_logits_5 = self.norm_atten_map(var_logits_5)
+            # neg_mask_5 = norm_var_logits_5 > self.args.th_bg
+            # neg_mask_5 = neg_mask_5.float().unsqueeze(1).repeat(1,c,1,1)
+            # neg_mask_4 = F.interpolate(neg_mask_5, size=(h4,w4), mode='nearest')
+            # neg_mask_3 = F.interpolate(neg_mask_5, size=(h3,w3), mode='nearest')
+            #
+            # logits_4 = logits_4 * neg_mask_4.detach()
+            # logits_3 = logits_3 * neg_mask_3.detach()
 
-            norm_atten_mask_3 = F.max_pool2d(norm_atten_mask_3, kernel_size=2, stride=2)
-            norm_atten_mask_4 = F.max_pool2d(norm_atten_mask_4, kernel_size=2, stride=2)
 
-            logits_4 = logits_4 * norm_atten_mask_3.detach()
-            logits_5 = logits_5 * norm_atten_mask_4.detach()
 
-        # cls_logits_3 = torch.mean(torch.mean(logits_3, dim=2), dim=2)
-        # cls_logits_4 = torch.mean(torch.mean(logits_4, dim=2), dim=2)
+        cls_logits_3 = torch.mean(torch.mean(logits_3, dim=2), dim=2)
+        cls_logits_4 = torch.mean(torch.mean(logits_4, dim=2), dim=2)
         cls_logits_5 = torch.mean(torch.mean(logits_5, dim=2), dim=2)
         cls_logits_6 = torch.mean(torch.mean(logits_6, dim=2), dim=2)
 
-        # loss_3 = self.loss_cross_entropy(cls_logits_3, gt_child_label.long())
-        # loss_4 = self.loss_cross_entropy(cls_logits_4, gt_child_label.long())
+        loss_3 = self.loss_cross_entropy(cls_logits_3, gt_child_label.long())
+        loss_4 = self.loss_cross_entropy(cls_logits_4, gt_child_label.long())
         loss_5 = self.loss_cross_entropy(cls_logits_5, gt_child_label.long())
         loss_6 = self.loss_cross_entropy(cls_logits_6, gt_child_label.long())
-        loss = self.args.loss_w_5 * loss_5 + self.args.loss_w_6 * loss_6
+        loss = self.args.loss_w_5 * loss_5 + self.args.loss_w_6 * loss_6 + self.args.loss_w_3 * loss_3 + self.args.loss_w_4 * loss_4
 
         if self.args.loc_branch and epoch >= loc_start:
-            # loc_loss = self.get_loc_loss(logits, gt_child_label, self.args.th_bg, self.args.th_fg)
-            loss_3, loss_4 = self.loc_loss_fpn(logits_3, logits_4, logits_5, gt_child_label)
-            loc_loss = self.args.loss_w_3 * loss_3 + self.args.loss_w_4 * loss_4
+            loc_loss = self.get_loc_loss(loc_logits_3,loc_logits_4,loc_logits_5, gt_child_label, self.args.th_bg, self.args.th_fg, com_feat=False)
+            # loc_loss = self.args.loss_w_3 * loss_3 + self.args.loss_w_4 * loss_4
             loss += loc_loss
         else:
-            loss_4 = torch.zeros_like(loss)
-            loss_3 = torch.zeros_like(loss)
+            # loss_4 = torch.zeros_like(loss)
+            # loss_3 = torch.zeros_like(loss)
             loc_loss = torch.zeros_like(loss)
         return loss, loss_3, loss_4, loss_5, loss_6, loc_loss
 
@@ -405,29 +467,70 @@ class VGG(nn.Module):
 
         return bin_loss_3, bin_loss_4
 
-    def get_loc_loss(self, logits, gt_child_label, th_bg=0.3, th_fg=0.5):
+    def get_loc_loss(self, logits_3, logits_4, logits_5, gt_child_label, th_bg=0.3, th_fg=0.5, com_feat=False):
         n, c, lh, lw = self.loc_map.size()
         if self.args.avg_bin:
             loc_map_cls = F.avg_pool2d(self.loc_map, kernel_size=self.args.avg_size, stride=self.args.avg_stride)
             # loc_map_cls = F.adaptive_avg_pool2d(self.loc_map, output_size=1)
         else:
             loc_map_cls = self.loc_map
+        if com_feat:
+            cls_logits_3 = F.softmax(logits_3, dim=1)
+            var_logits_3 = torch.var(cls_logits_3, dim=1)
+            norm_var_logits_3 = self.normalize_feat(var_logits_3)
+            norm_var_logits_3 = F.interpolate(norm_var_logits_3.unsqueeze(1), size=(lh, lw), mode='bilinear',
+                                            align_corners=True)
 
-        _, _, h, w = logits.size()
-        cls_logits = F.softmax(logits, dim=1)
-        var_logits = torch.var(cls_logits, dim=1)
-        norm_var_logits = self.normalize_feat(var_logits)
-        norm_var_logits = F.interpolate(norm_var_logits.unsqueeze(1),size=(lh,lw), mode='bilinear', align_corners=True)
+            cls_logits_4 = F.softmax(logits_4, dim=1)
+            var_logits_4 = torch.var(cls_logits_4, dim=1)
+            norm_var_logits_4 = self.normalize_feat(var_logits_4)
+            norm_var_logits_4 = F.interpolate(norm_var_logits_4.unsqueeze(1), size=(lh, lw), mode='bilinear',
+                                              align_corners=True)
 
-        fg_cls = cls_logits[torch.arange(n), gt_child_label.long(), ...].clone()
-        fg_cls = self.normalize_feat(fg_cls)
-        norm_fg_cls = F.interpolate(fg_cls.unsqueeze(1),size=(lh,lw), mode='bilinear', align_corners=True)
+            cls_logits_5 = F.softmax(logits_5, dim=1)
+            var_logits_5 = torch.var(cls_logits_5, dim=1)
+            norm_var_logits_5 = self.normalize_feat(var_logits_5)
+            norm_var_logits_5 = F.interpolate(norm_var_logits_5.unsqueeze(1), size=(lh, lw), mode='bilinear',
+                                              align_corners=True)
+
+            norm_var_logits = (norm_var_logits_3 + norm_var_logits_4 + norm_var_logits_5) /3.
+
+            fg_cls_3 = cls_logits_3[torch.arange(n), gt_child_label.long(), ...].clone()
+            fg_cls_3 = self.normalize_feat(fg_cls_3)
+            norm_fg_cls_3 = F.interpolate(fg_cls_3.unsqueeze(1),size=(lh,lw), mode='bilinear', align_corners=True)
+            fg_cls_4 = cls_logits_4[torch.arange(n), gt_child_label.long(), ...].clone()
+            fg_cls_4 = self.normalize_feat(fg_cls_4)
+            norm_fg_cls_4 = F.interpolate(fg_cls_4.unsqueeze(1), size=(lh, lw), mode='bilinear', align_corners=True)
+            fg_cls_5 = cls_logits_5[torch.arange(n), gt_child_label.long(), ...].clone()
+            fg_cls_5 = self.normalize_feat(fg_cls_5)
+            norm_fg_cls_5 = F.interpolate(fg_cls_5.unsqueeze(1), size=(lh, lw), mode='bilinear', align_corners=True)
+
+            norm_fg_cls = (norm_fg_cls_3 + norm_fg_cls_4 + norm_fg_cls_5) / 3.
+        else:
+            cls_logits_5 = F.softmax(logits_5, dim=1)
+            var_logits_5 = torch.var(cls_logits_5, dim=1)
+            norm_var_logits_5 = self.normalize_feat(var_logits_5)
+            norm_var_logits = F.interpolate(norm_var_logits_5.unsqueeze(1), size=(lh, lw), mode='bilinear',
+                                            align_corners=True)
+
+            fg_cls_5 = cls_logits_5[torch.arange(n), gt_child_label.long(), ...].clone()
+            fg_cls_5 = self.normalize_feat(fg_cls_5)
+            norm_fg_cls = F.interpolate(fg_cls_5.unsqueeze(1), size=(lh, lw), mode='bilinear', align_corners=True)
+            # cls_logits_3 = F.softmax(logits_3, dim=1)
+            # var_logits_3 = torch.var(cls_logits_3, dim=1)
+            # norm_var_logits_3 = self.normalize_feat(var_logits_3)
+            # norm_var_logits = F.interpolate(norm_var_logits_3.unsqueeze(1), size=(lh, lw), mode='bilinear',
+            #                                   align_corners=True)
+            #
+            # fg_cls_3 = cls_logits_3[torch.arange(n), gt_child_label.long(), ...].clone()
+            # fg_cls_3 = self.normalize_feat(fg_cls_3)
+            # norm_fg_cls = F.interpolate(fg_cls_3.unsqueeze(1), size=(lh, lw), mode='bilinear', align_corners=True)
+
         # norm_fg_cls = norm_fg_cls.squeeze()
 
-        norm_cls = (norm_var_logits + norm_fg_cls) * 0.5
         cls_mask = -1 * torch.ones_like(norm_var_logits)
-        cls_mask[norm_cls < th_bg] = 0.
-        cls_mask[norm_cls > th_fg] = 1.
+        cls_mask[norm_var_logits  < th_bg] = 0.
+        cls_mask[norm_fg_cls > th_fg] = 1.
 
         if self.args.avg_bin:
             cls_mask = F.max_pool2d(cls_mask, kernel_size=self.args.avg_size, stride=self.args.avg_stride)

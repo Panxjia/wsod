@@ -58,16 +58,11 @@ def get_topk_boxes_hier(logits3, logits2, logits1, cam_map, parent_map, root_map
     if not NoHDA:
         logits2 = logits2.data.cpu().numpy()
         logits1 = logits1.data.cpu().numpy()
-    if com_feat:
-        cam_map_0, cam_map_1, cam_map_2 = cam_map
-        cam_map_0 = cam_map_0.data.cpu().numpy()
-        cam_map_1 = cam_map_1.data.cpu().numpy()
-        cam_map_2 = cam_map_2.data.cpu().numpy()
-    else:
+    if not com_feat:
         cam_map = cam_map.data.cpu().numpy()
-    if not NoHDA:
-        parent_map = parent_map.data.cpu().numpy()
-        root_map = root_map.data.cpu().numpy()
+        if not NoHDA:
+            parent_map = parent_map.data.cpu().numpy()
+            root_map = root_map.data.cpu().numpy()
     maxk = max(topk)
 
     species_cls = np.argsort(logits3)[::-1][:maxk]
@@ -82,42 +77,36 @@ def get_topk_boxes_hier(logits3, logits2, logits1, cam_map, parent_map, root_map
     maxk_boxes = []
     maxk_maps = []
     for i in range(maxk):
-        if bin_map :
-            cam_map_ = cam_map[0,0,...]
+        if com_feat:
+            cam_map_0 = cam_map[0][i]
+            cam_map_1 = cam_map[1][i]
+            cam_map_2 = cam_map[2][i]
+            cam_map_com = np.stack((cam_map_0, cam_map_1, cam_map_2),axis=0)
+            # cam_map_cls = np.max(cam_map_com, axis=0)
+            cam_map_cls = (cam_map_0 + cam_map_1+cam_map_2)/3.
         else:
-            if gt:
-                species_cls[i] = gt
-            if gcam or g2:
-                cam_map_ = cam_map[0, i, :, :]
-                if not NoHDA:
-                    parent_map_ = parent_map[0, i, :, :]
-                    root_map_ = root_map[0, i, :, :]
+            if bin_map :
+                cam_map_ = cam_map[0,0,...]
             else:
-                if com_feat:
-                    cam_map_0_ = cam_map_0[0, species_cls[i], :, :]
-                    cam_map_1_ = cam_map_1[0, species_cls[i], :, :]
-                    cam_map_2_ = cam_map_2[0, species_cls[i], :, :]
+                if gt:
+                    species_cls[i] = gt
+                if gcam or g2:
+                    cam_map_ = cam_map[0, i, :, :]
+                    if not NoHDA:
+                        parent_map_ = parent_map[0, i, :, :]
+                        root_map_ = root_map[0, i, :, :]
                 else:
                     cam_map_ = cam_map[0, species_cls[i], :, :]
-                if not NoHDA:
-                    parent_map_ = parent_map[0, parent_cls[i], :, :]
-                    root_map_ = root_map[0, root_cls[i], :, :]
-                    cam_map_ = cam_map_ + parent_map_ + root_map_
-            if com_feat:
-                cam_map_0_ = norm_atten_map(cam_map_0_)  # normalize cam map
-                cam_map_1_ = norm_atten_map(cam_map_1_)  # normalize cam map
-                cam_map_2_ = norm_atten_map(cam_map_2_)  # normalize cam map
-                cam_map_ = cam_map_0_ + cam_map_1_ + cam_map_2_
-                cam_map_ = norm_atten_map(cam_map_)
-                # cam_map_ = np.maximum(cam_map_0_, cam_map_1_, cam_map_2_)
-            else:
-                cam_map_ = norm_atten_map(cam_map_)  # normalize cam map
-            # parent_map_ = norm_atten_map(parent_map_)  # normalize cam map
-            # root_map_ = norm_atten_map(root_map_)  # normalize cam map
-            # cam_map_ = np.maximum(cam_map_, parent_map_)  # normalize cam map
-            # cam_map_ = np.maximum(cam_map_, root_map_)  # normalize cam map
+                    if not NoHDA:
+                        parent_map_ = parent_map[0, parent_cls[i], :, :]
+                        root_map_ = root_map[0, root_cls[i], :, :]
+                        cam_map_ = cv2.resize(cam_map_, dsize=(w, h))
+                        parent_map_ = cv2.resize(parent_map_, dsize=(w, h))
+                        root_map_ = cv2.resize(root_map_, dsize=(w, h))
+                        cam_map_ = cam_map_ + parent_map_ + root_map_
+                    cam_map_ = norm_atten_map(cam_map_)  # normalize cam map
 
-        cam_map_cls = cv2.resize(cam_map_, dsize=(w, h))
+            cam_map_cls = cv2.resize(cam_map_, dsize=(w, h))
         maxk_maps.append(cam_map_cls.copy())
         # segment the foreground
         fg_map = cam_map_cls >= threshold

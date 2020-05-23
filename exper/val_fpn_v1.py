@@ -69,8 +69,17 @@ class opts(object):
         self.parser.add_argument("--vis_var", action='store_true', help='.')
         self.parser.add_argument("--debug_dir", type=str, default='../debug', help='save visualization results.')
         self.parser.add_argument("--vis_dir", type=str, default='../vis_dir', help='save visualization results.')
+        self.parser.add_argument("--eval_gcam", action='store_true', help='.')
+        self.parser.add_argument("--eval_g2", action='store_true', help='.')
         self.parser.add_argument("--mce", action='store_true',
                                  help='classification loss using cross entropy.')
+        self.parser.add_argument("--bbce", action='store_true',
+                                 help='classification loss using binary cross entropy loss with background.')
+        self.parser.add_argument("--bce", action='store_true',
+                                 help='classification loss using binary cross entropy loss.')
+        self.parser.add_argument("--sup", type=int, default=1)
+        self.parser.add_argument("--lb", action='store_true',
+                                 help='classification loss using both binary cross entropy loss and cross entropy loss.')
         self.parser.add_argument("--bg", action='store_true',help='grad_cam for background.')
         self.parser.add_argument("--IN", action='store_true', help='switch off instance norm layer in first two conv blocks in Network.')
         self.parser.add_argument("--INL", action='store_true', help='switch off instance norm layer with learn affine parms in first two conv blocks in Network.')
@@ -91,14 +100,14 @@ class opts(object):
         self.parser.add_argument("--sep_loss", action='store_true', help='switch on calculating loss for each individual.')
         self.parser.add_argument("--loc_branch", action='store_true', help='switch on location branch.')
         self.parser.add_argument("--com_feat", action='store_true', help='switch on location branch.')
-
+        self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
+        self.parser.add_argument("--bifpn", action='store_true', help='switch on adopting bifpn architecture.')
         self.parser.add_argument("--loss_w_3", type=float, default=0., help='weight of classification loss for 3-th level.')
         self.parser.add_argument("--loss_w_4", type=float, default=0., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--loss_w_5", type=float, default=0., help='weight of classification loss for 5-th level.')
-        self.parser.add_argument("--loss_w_6", type=float, default=0., help='weight of classification loss for 6-th level.')
         self.parser.add_argument("--vis_th", type=float, default=0.2, help='threshold for visualizatoin')
-        self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
-        self.parser.add_argument("--bifpn", action='store_true', help='switch on adopting bifpn architecture.')
+        self.parser.add_argument("--erase", action='store_true', help='switch on erasing strategy.')
+        self.parser.add_argument("--l5_red", action='store_true', help='switch on erasing strategy.')
 
     def parse(self):
         opt = self.parser.parse_args()
@@ -123,21 +132,59 @@ def get_model(args):
 
     return model
 
+def get_grad(model, logits, feat, num_maps, layer='cls3', topk=(1,), logits_ce=None, bg=False):
+    grads = {}
+    gcam = None
+    g2 = None
+    maxk = max(topk)
+    if logits_ce is not None:
+        pred_clses = torch.argsort(logits_ce.view(-1), descending=True)[:maxk]
+    else:
+        if bg:
+            pred_clses = torch.argsort(logits.view(-1)[:-1], descending=True)[:maxk]
+            # pred_clses = (-1,)*maxk
+        else:
+            pred_clses = torch.argsort(logits.view(-1), descending=True)[:maxk]
+    feat_clone = feat.clone()
+    n, _, h, w = feat_clone.size()
+    feat_clone[feat_clone > 0] = 1
+    feat_clone = feat_clone.view(n, -1, num_maps, h, w)
+    for i, pred_cls in enumerate(pred_clses):
+        grad_traget_map = torch.zeros_like(logits)
+        grad_traget_map[0,pred_cls] = 1
+        if bg:
+            grad_traget_map[0, -1] = -1
+        model.zero_grad()
+        logits.backward(grad_traget_map, retain_graph=True)
+        if g2 is None:
+            g2 = model.module.guided_grad.max(dim=1, keepdim=True)[0]
+        else:
+            g2 = torch.cat((g2,model.module.guided_grad.max(dim=1, keepdim=True)[0]), dim=1)
+
+        last_layer_grad = model.module.last_layer_grad_out[layer].view(n, -1, num_maps, h, w)
+        last_layer_grad = last_layer_grad * feat_clone
+        last_layer_grad_w = last_layer_grad.mean(dim=3,keepdim=True).mean(dim=4, keepdim=True)
+        feat = feat.view(n, -1, num_maps, h, w)
+        gcam_i = (feat*last_layer_grad_w).sum(dim=2)/(last_layer_grad_w.sum(dim=2)+1e-13)
+        # gcam_i = feat.mean(dim=2)
+        gcam_i = gcam_i[:,int(pred_cls):int(pred_cls)+1,:,:]
+        # gcam_i = gcam_i[:,int(pred_cls):,:,:]
+        if layer != 'cls3':
+            gcam_i = F.interpolate(gcam_i, size=args.size, mode='bilinear', align_corners=True)
+        if gcam is None:
+            gcam = gcam_i
+        else:
+            gcam = torch.cat((gcam,gcam_i),dim=1)
+    grads['gcam_{}'.format(layer)] = gcam
+    grads['g2_{}'.format(layer)] = g2
+    return grads
 
 def eval_loc(cls_logits, cls_map, img_path, input_size, crop_size, label, gt_boxes,
-             topk=(1,5), threshold=None, mode='union', debug=False, debug_dir=None, gcam=False,
-             g2=False, NoHDA=True, com_feat=False, bin_map=False, cls_logits_1=None, cls_logits_2=None, cls_map_1=None,
-             cls_map_2=None):
-    if cls_logits_1 is None:
-        top_boxes, top_maps = get_topk_boxes_hier(cls_logits[0], None, None, cls_map, None,
-                                                  None, img_path, input_size, crop_size, topk=topk,
-                                                  threshold=threshold, mode=mode, gcam=gcam, g2=g2,
-                                                  NoHDA=NoHDA, com_feat=com_feat, bin_map=bin_map)
-    else:
-        top_boxes, top_maps = get_topk_boxes_hier(cls_logits[0], cls_logits_1[0], cls_logits_2[0], cls_map, cls_map_1,
-                                                  cls_map_2, img_path, input_size, crop_size, topk=topk,
-                                                  threshold=threshold, mode=mode, gcam=gcam, g2=g2,
-                                                  NoHDA=NoHDA, com_feat=com_feat, bin_map=bin_map)
+             topk=(1,5), threshold=None, mode='union', debug=False, debug_dir=None, gcam=False, g2=False, NoHDA=True,
+             bin_map=False, com_feat=False):
+    top_boxes, top_maps = get_topk_boxes_hier(cls_logits[0], None, None, cls_map, None, None, img_path, input_size,
+                                              crop_size, topk=topk, threshold=threshold, mode=mode, gcam=gcam, g2=g2,
+                                              NoHDA=NoHDA, bin_map=bin_map, com_feat=com_feat)
     top1_box, top5_boxes = top_boxes
 
     # update result record
@@ -213,10 +260,10 @@ def vis_var(feat, cls_logits, img_path, vis_path, net='vgg_baseline'):
 
     im = cv2.imread(img_path)
     h, w, _ = np.shape(im)
-    resized_var_no_white = cv2.resize(norm_var_no_white, (w, h)) <0.7
-    resized_cls_no_white = cv2.resize(norm_cls_no_white, (w, h)) >0.2
-    resized_var = cv2.resize(norm_var, (w, h)) <0.2
-    resized_cls= cv2.resize(norm_cls, (w, h)) >0.5
+    resized_var_no_white = cv2.resize(norm_var_no_white, (w, h))
+    resized_cls_no_white = cv2.resize(norm_cls_no_white, (w, h))
+    resized_var = cv2.resize(norm_var, (w, h))
+    resized_cls= cv2.resize(norm_cls, (w, h))
 
     draw_im = 255 * np.ones((h + 15, w+5, 3), np.uint8)
     draw_im[:h, :w, :] = im
@@ -323,22 +370,29 @@ def val(args):
     gt_boxes = [(box[0], box[1], box[0]+box[2]-1, box[1]+box[3]-1) for box in gt_boxes]
 
     # meters
+    top1_clsacc = AverageMeter()
+    top5_clsacc = AverageMeter()
+    top1_clsacc.reset()
+    top5_clsacc.reset()
     top1_f3_clsacc = AverageMeter()
     top5_f3_clsacc = AverageMeter()
     top1_f4_clsacc = AverageMeter()
     top5_f4_clsacc = AverageMeter()
-    top1_f5_clsacc = AverageMeter()
-    top5_f5_clsacc = AverageMeter()
-    top1_f6_clsacc = AverageMeter()
-    top5_f6_clsacc = AverageMeter()
-    top1_f5_clsacc.reset()
-    top5_f5_clsacc.reset()
-    top1_f6_clsacc.reset()
-    top5_f6_clsacc.reset()
+    top1_f3_clsacc.reset()
+    top5_f3_clsacc.reset()
+    top1_f4_clsacc.reset()
+    top5_f4_clsacc.reset()
 
     loc_err = {}
-
     for th in args.threshold:
+        loc_err['top1_locerr_{}'.format(th)] = AverageMeter()
+        loc_err['top1_locerr_{}'.format(th)].reset()
+        loc_err['top5_locerr_{}'.format(th)] = AverageMeter()
+        loc_err['top5_locerr_{}'.format(th)].reset()
+        loc_err['top1_deterr_{}'.format(th)] = AverageMeter()
+        loc_err['top1_deterr_{}'.format(th)].reset()
+        loc_err['top5_deterr_{}'.format(th)] = AverageMeter()
+        loc_err['top5_deterr_{}'.format(th)].reset()
         loc_err['top1_f3_locerr_{}'.format(th)] = AverageMeter()
         loc_err['top1_f3_locerr_{}'.format(th)].reset()
         loc_err['top5_f3_locerr_{}'.format(th)] = AverageMeter()
@@ -355,14 +409,6 @@ def val(args):
         loc_err['top1_f4_deterr_{}'.format(th)].reset()
         loc_err['top5_f4_deterr_{}'.format(th)] = AverageMeter()
         loc_err['top5_f4_deterr_{}'.format(th)].reset()
-        loc_err['top1_f5_locerr_{}'.format(th)] = AverageMeter()
-        loc_err['top1_f5_locerr_{}'.format(th)].reset()
-        loc_err['top5_f5_locerr_{}'.format(th)] = AverageMeter()
-        loc_err['top5_f5_locerr_{}'.format(th)].reset()
-        loc_err['top1_f5_deterr_{}'.format(th)] = AverageMeter()
-        loc_err['top1_f5_deterr_{}'.format(th)].reset()
-        loc_err['top5_f5_deterr_{}'.format(th)] = AverageMeter()
-        loc_err['top5_f5_deterr_{}'.format(th)].reset()
         loc_err['top1_com_locerr_{}'.format(th)] = AverageMeter()
         loc_err['top1_com_locerr_{}'.format(th)].reset()
         loc_err['top5_com_locerr_{}'.format(th)] = AverageMeter()
@@ -379,7 +425,6 @@ def val(args):
         loc_err['top1_bin_deterr_{}'.format(th)].reset()
         loc_err['top5_bin_deterr_{}'.format(th)] = AverageMeter()
         loc_err['top5_bin_deterr_{}'.format(th)].reset()
-
     # get model
     model = get_model(args)
     model.eval()
@@ -395,17 +440,17 @@ def val(args):
         np.random.seed(2333)
         show_idxs = np.arange(len(valcls_loader))
         np.random.shuffle(show_idxs)
-        show_idxs = show_idxs[:100]
+        show_idxs = show_idxs[:50]
 
     # evaluation classification task
 
     for idx, (dat_cls, dat_loc ) in tqdm(enumerate(zip(valcls_loader, valloc_loader))):
-        grads = {}
         # parse data
         img_path, img, label_in = dat_cls
         if args.tencrop == 'True':
             bs, ncrops, c, h, w = img.size()
             img = img.view(-1, c, h, w)
+
 
         # forward pass
         args.device = torch.device('cuda') if args.gpus[0]>=0 else torch.device('cpu')
@@ -423,27 +468,28 @@ def val(args):
             if idx in show_idxs:
                 _, img_loc, label = dat_loc
                 logits = model(img_loc)
-                cls_logits = F.softmax(logits[2],dim=1)
+                cls_logits = F.softmax(logits,dim=1)
                 var_logits = torch.var(cls_logits,dim=1).squeeze()
-                vis_var(var_logits, cls_logits[0,label.long(),...], img_path[0], args.vis_dir, net='vis_var_vgg_16_fpn_l5_1_100e_7_2')
+                vis_var(var_logits, cls_logits[0,label.long(),...], img_path[0], args.vis_dir, net='vgg_baseline_var_cls')
             continue
         logits = model(img)
 
-        logits3, logits4, logits5, logits6 = logits
-        cls_logits_3 = torch.mean(torch.mean(logits3, dim=2), dim=2)
-        cls_logits_4 = torch.mean(torch.mean(logits4, dim=2), dim=2)
-        cls_logits_5 = torch.mean(torch.mean(logits5, dim=2), dim=2)
-        cls_logits_6 = torch.mean(torch.mean(logits6, dim=2), dim=2)
 
-        cls_logits_3 = F.softmax(cls_logits_3, dim=1)
+        cls_logits = torch.mean(torch.mean(logits, dim=2), dim=2)
+        cls_logits_4 = torch.mean(torch.mean(model.module.cls_map_4, dim=2), dim=2)
+        cls_logits_3 = torch.mean(torch.mean(model.module.cls_map_3, dim=2), dim=2)
+
+        cls_logits = F.softmax(cls_logits, dim=1)
         cls_logits_4 = F.softmax(cls_logits_4, dim=1)
-        cls_logits_5 = F.softmax(cls_logits_5, dim=1)
-        cls_logits_6 = F.softmax(cls_logits_6, dim=1)
+        cls_logits_3 = F.softmax(cls_logits_3, dim=1)
         if args.tencrop == 'True':
-            cls_logits_3 = cls_logits_3.view(1, ncrops, -1).mean(1)
+            cls_logits = cls_logits.view(1, ncrops, -1).mean(1)
             cls_logits_4 = cls_logits_4.view(1, ncrops, -1).mean(1)
-            cls_logits_5 = cls_logits_5.view(1, ncrops, -1).mean(1)
-            cls_logits_6 = cls_logits_6.view(1, ncrops, -1).mean(1)
+            cls_logits_3 = cls_logits_3.view(1, ncrops, -1).mean(1)
+
+        prec1_1, prec5_1 = evaluate.accuracy(cls_logits.cpu().data, label_in.long(), topk=(1, 5))
+        top1_clsacc.update(prec1_1[0].numpy(), img.size()[0])
+        top5_clsacc.update(prec5_1[0].numpy(), img.size()[0])
 
         prec1_f3, prec5_f3 = evaluate.accuracy(cls_logits_3.cpu().data, label_in.long(), topk=(1, 5))
         top1_f3_clsacc.update(prec1_f3[0].numpy(), img.size()[0])
@@ -453,25 +499,18 @@ def val(args):
         top1_f4_clsacc.update(prec1_f4[0].numpy(), img.size()[0])
         top5_f4_clsacc.update(prec5_f4[0].numpy(), img.size()[0])
 
-        prec1_f5, prec5_f5 = evaluate.accuracy(cls_logits_5.cpu().data, label_in.long(), topk=(1, 5))
-        top1_f5_clsacc.update(prec1_f5[0].numpy(), img.size()[0])
-        top5_f5_clsacc.update(prec5_f5[0].numpy(), img.size()[0])
-
-        prec1_f6, prec5_f6 = evaluate.accuracy(cls_logits_6.cpu().data, label_in.long(), topk=(1, 5))
-        top1_f6_clsacc.update(prec1_f6[0].numpy(), img.size()[0])
-        top5_f6_clsacc.update(prec5_f6[0].numpy(), img.size()[0])
-
         _, img_loc, label = dat_loc
-        cls_map_3, cls_map_4, cls_map_5, cls_map_6= model(img_loc)
-
+        _ = model(img_loc)
+        loc_map = model.module.get_loc_maps() if args.loc_branch else model.module.get_cls_maps()
+        bg_map = None
         if args.loc_branch:
             pass
             # loc_map = loc_map[:,:-1,...] - loc_map[:,-1:,...]
             # bg_map = loc_map[0,-1,...].data.cpu().numpy()
             # bg_map = norm_atten_map(bg_map)
-
+        # loc_map = F.interpolate(loc_map, size=args.size, mode='bilinear', align_corners=True)
         if args.loss_w_3 >0.:
-            cls_map_3 = F.relu(cls_map_3)
+            cls_map_3 = F.relu(model.module.cls_map_3)
             for th in args.threshold:
                 deterr_1, locerr_1, deterr_5, locerr_5, top_maps_3, top5_boxes = eval_loc(cls_logits_3, cls_map_3,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
@@ -486,7 +525,7 @@ def val(args):
                                         gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv3')
         if args.loss_w_4 >0.:
-            cls_map_4 = F.relu(cls_map_4)
+            cls_map_4 = F.relu(model.module.cls_map_4)
             for th in args.threshold:
                 deterr_1, locerr_1, deterr_5, locerr_5, top_maps_4, top5_boxes = eval_loc(cls_logits_4, cls_map_4,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
@@ -502,16 +541,16 @@ def val(args):
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='lv4')
 
         if args.loss_w_5 >0.:
-            cls_map_5 = F.relu(cls_map_5)
+            cls_map_5 = F.relu(model.module.cls_map)
             for th in args.threshold:
-                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_5, top5_boxes = eval_loc(cls_logits_5, cls_map_5,
+                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_5, top5_boxes = eval_loc(cls_logits, cls_map_5,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
                                                 topk=(1, 5), threshold=th, mode='union', debug=args.debug,
                                                 debug_dir=args.debug_dir, NoHDA=True, bin_map = False)
-                loc_err['top1_f5_deterr_{}'.format(th)].update(deterr_1, img.size()[0])
-                loc_err['top5_f5_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
-                loc_err['top1_f5_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
-                loc_err['top5_f5_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
+                loc_err['top1_deterr_{}'.format(th)].update(deterr_1, img.size()[0])
+                loc_err['top5_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
+                loc_err['top1_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
+                loc_err['top5_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
                 if args.debug and idx in show_idxs and th == args.vis_th:
                     save_im_heatmap_box(img_path[0], top_maps_5, top5_boxes, args.debug_dir,
                                         gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
@@ -520,7 +559,7 @@ def val(args):
         if args.com_feat:
             cls_map_com = (top_maps_3, top_maps_4, top_maps_5)
             for th in args.threshold:
-                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_com, top5_boxes = eval_loc(cls_logits_5, cls_map_com,
+                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_com, top5_boxes = eval_loc(cls_logits, cls_map_com,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
                                                 topk=(1, 5), threshold=th, mode='union', debug=args.debug,
                                                 debug_dir=args.debug_dir, NoHDA=True, bin_map = False, com_feat=True)
@@ -534,9 +573,8 @@ def val(args):
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='com')
 
         if args.loc_branch:
-            cls_map_bin = model.module.get_loc_maps()
             for th in args.threshold:
-                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_bin, top5_boxes = eval_loc(cls_logits_5, cls_map_bin,
+                deterr_1, locerr_1, deterr_5, locerr_5, top_maps_bin, top5_boxes = eval_loc(cls_logits, loc_map,
                                                 img_path[0], args.input_size, args.crop_size, label, gt_boxes[idx],
                                                 topk=(1, 5), threshold=th, mode='union', debug=args.debug,
                                                 debug_dir=args.debug_dir, NoHDA=True, bin_map = True)
@@ -544,19 +582,18 @@ def val(args):
                 loc_err['top5_bin_deterr_{}'.format(th)].update(deterr_5, img.size()[0])
                 loc_err['top1_bin_locerr_{}'.format(th)].update(locerr_1, img.size()[0])
                 loc_err['top5_bin_locerr_{}'.format(th)].update(locerr_5, img.size()[0])
-                if args.debug and idx in show_idxs and th == 0.9999:
+                if args.debug and idx in show_idxs and th == 0.98:
                     save_im_heatmap_box(img_path[0], top_maps_bin, top5_boxes, args.debug_dir,
                                         gt_label=label.data.long().numpy(), sim_map=None, bg_map=None,
                                         gt_box=gt_boxes[idx], epoch=args.current_epoch,threshold=th, suffix='bin')
 
-
-
     print('== cls err')
-
     if args.loss_w_5 > 0:
-        print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_f5_clsacc.avg, 100.0 - top5_f5_clsacc.avg))
-    if args.loss_w_6 > 0:
-        print('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(100.0 - top1_f6_clsacc.avg, 100.0 - top5_f6_clsacc.avg))
+        print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_clsacc.avg, 100.0 - top5_clsacc.avg))
+    if args.loss_w_4 > 0:
+        print('Top1_f4: {:.2f} Top5_f4: {:.2f}\n'.format(100.0 - top1_f4_clsacc.avg, 100.0 - top5_f4_clsacc.avg))
+    if args.loss_w_3 > 0:
+        print('Top1_f3: {:.2f} Top5_f3: {:.2f}\n'.format(100.0 - top1_f3_clsacc.avg, 100.0 - top5_f3_clsacc.avg))
 
 
     for th in args.threshold:
@@ -577,11 +614,11 @@ def val(args):
                                                                 loc_err['top5_f4_locerr_{}'.format(th)].avg))
         if args.loss_w_5 > 0:
             print('== det err')
-            print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_deterr_{}'.format(th)].avg,
-                                                                loc_err['top5_f5_deterr_{}'.format(th)].avg))
+            print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_deterr_{}'.format(th)].avg,
+                                                                loc_err['top5_deterr_{}'.format(th)].avg))
             print('== loc err ')
-            print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_locerr_{}'.format(th)].avg,
-                                                                loc_err['top5_f5_locerr_{}'.format(th)].avg))
+            print('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_locerr_{}'.format(th)].avg,
+                                                                loc_err['top5_locerr_{}'.format(th)].avg))
         if args.com_feat:
             print('== det err')
             print('Top1_com: {:.2f} Top5_com: {:.2f}\n'.format(loc_err['top1_com_deterr_{}'.format(th)].avg,
@@ -604,9 +641,11 @@ def val(args):
         fw.write('current_epoch:{}\n'.format(args.current_epoch))
         fw.write('== cls err ')
         if args.loss_w_5 > 0:
-            fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_f5_clsacc.avg, 100.0 - top5_f5_clsacc.avg))
-        if args.loss_w_6 > 0:
-            fw.write('Top1_f6: {:.2f} Top5_f6: {:.2f}\n'.format(100.0 - top1_f6_clsacc.avg, 100.0 - top5_f6_clsacc.avg))
+            fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(100.0 - top1_clsacc.avg, 100.0 - top5_clsacc.avg))
+        if args.loss_w_4 > 0:
+            fw.write('Top1_f4: {:.2f} Top5_f4: {:.2f}\n'.format(100.0 - top1_f4_clsacc.avg, 100.0 - top5_f4_clsacc.avg))
+        if args.loss_w_3 > 0:
+            fw.write('Top1_f3: {:.2f} Top5_f6: {:.2f}\n'.format(100.0 - top1_f3_clsacc.avg, 100.0 - top5_f3_clsacc.avg))
 
         for th in args.threshold:
             fw.write('=========== threshold: {} ===========\n'.format(th))
@@ -627,11 +666,11 @@ def val(args):
 
             if args.loss_w_5 >0:
                 fw.write('== det err')
-                fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_deterr_{}'.format(th)].avg,
-                                                                 loc_err['top5_f5_deterr_{}'.format(th)].avg))
+                fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_deterr_{}'.format(th)].avg,
+                                                                 loc_err['top5_deterr_{}'.format(th)].avg))
                 fw.write('== loc err ')
-                fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_f5_locerr_{}'.format(th)].avg,
-                                                           loc_err['top5_f5_locerr_{}'.format(th)].avg))
+                fw.write('Top1_f5: {:.2f} Top5_f5: {:.2f}\n'.format(loc_err['top1_locerr_{}'.format(th)].avg,
+                                                           loc_err['top5_locerr_{}'.format(th)].avg))
 
             if args.com_feat:
                 fw.write('== det err')
@@ -648,6 +687,7 @@ def val(args):
                 fw.write('== loc err ')
                 fw.write('Top1_bin: {:.2f} Top5_com: {:.2f}\n'.format(loc_err['top1_bin_locerr_{}'.format(th)].avg,
                                                            loc_err['top5_bin_locerr_{}'.format(th)].avg))
+
 
 if __name__ == '__main__':
     args = opts().parse()

@@ -2,8 +2,8 @@
 
 cd ../exper/
 
-python train_cam_fpn.py \
-    --arch=vgg_fpn \
+python train_fpn_v1.py \
+    --arch=vgg_fpn_v1 \
     --epoch=100 \
     --lr=0.001 \
     --batch_size=30 \
@@ -14,15 +14,15 @@ python train_cam_fpn.py \
     --resume=False \
     --pretrained_model=vgg16.pth \
     --seed=0 \
-    --snapshot_dir=../snapshots/vgg_16_s10_.2_.5_rep4 \
-    --log_dir=../log/vgg_16_s10_.2_.5_rep4 \
+    --snapshot_dir=../snapshots/vgg_16_fpn_v1_loc_l3_.2_.5\
+    --log_dir=../log/vgg_16_fpn_v1_loc_l3_.2_.5  \
     --onehot=False \
     --decay_point=80 \
     --mce \
-    --loss_w_5=1. \
+    --fpn \
+    --loss_w_3=1.0 \
     --loc_branch \
-    --loc_start=10 \
+    --loc_start=5 \
+    --loc_layer=3 \
     --th_bg=0.2 \
     --th_fg=0.5 \
-
-
