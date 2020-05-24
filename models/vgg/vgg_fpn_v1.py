@@ -35,13 +35,14 @@ class VGG(nn.Module):
         self.fmp = features[-1]  # final max pooling
         self.num_classes = num_classes
         self.args = args
-        self.cls = nn.Sequential(
+        self.cls_feat = nn.Sequential(
             nn.Conv2d(512, 1024, kernel_size=3, padding=1, dilation=1),  # fc6
             nn.ReLU(True),
             nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1),  # fc7
-            nn.ReLU(True),
-            nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0)
+            nn.ReLU(True)
         )
+        self.cls = nn.Conv2d(1024, self.num_classes, kernel_size=1, padding=0)
+
         if self.args.fpn or self.args.bifpn:
             self.cls4 = nn.Sequential(
                 nn.Conv2d(512, 1024, kernel_size=3, padding=1),
@@ -260,9 +261,18 @@ class VGG(nn.Module):
                 #     feat_5_2 = feat_5_2 * neg_mask_5.detach()
 
             else:
-                cls_map = self.cls(feat_5_2)
-                cls_map_4 = self.cls4(feat_4_2)
-                cls_map_3 = self.cls3(feat_3_2)
+                # cls_map = self.cls(feat_5_2)
+                # cls_map_4 = self.cls4(feat_4_2)
+                # cls_map_3 = self.cls3(feat_3_2)
+                feat_5_cls = self.cls_feat(feat_5_2)
+                self.feat_5_cls = feat_5_cls
+                feat_4_cls = self.cls_feat(feat_4_2)
+                self.feat_4_cls = feat_4_cls
+                feat_3_cls = self.cls_feat(feat_3_2)
+                self.feat_3_cls = feat_3_cls
+                cls_map = self.cls(feat_5_cls)
+                cls_map_4 = self.cls(feat_4_cls)
+                cls_map_3 = self.cls(feat_3_cls)
 
             self.cls_map = cls_map
             self.cls_map_4 = cls_map_4
@@ -531,8 +541,6 @@ class VGG(nn.Module):
         # loss = torch.sum(loss * pos_sam)
         # return loss/float(torch.sum(pos_sam))
 
-    def memo_prot(self):
-        pass
 
     def normalize_feat(self,feat):
         n, fh, fw = feat.size()
@@ -586,7 +594,24 @@ class VGG(nn.Module):
     def get_loc_maps(self):
         return torch.sigmoid(self.loc_map)
 
+class memomy_module_v0(object):
+    def __init__(self, n_classes, lr=0.5):
+        self._memo_kv = dict()
+        for i in range(n_classes+1):
+            self._memo_kv[i] = None
 
+        self.lr = lr
+
+    def assign(self, k, v):
+        self._memo_kv[k] = v
+
+    def update(self, k, feat_v):
+        for i, k_i in enumerate(k):
+            delta_v = torch.mean(self._memo_kv[k_i] - feat_v[i],dim=0)
+            self._memo_kv[k_i] -= self.lr*delta_v
+
+    def get_w(self, k):
+        return self._memo_kv[k]
 
 
 class cls_fea_hv(nn.Module):

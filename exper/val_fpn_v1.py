@@ -98,6 +98,7 @@ class opts(object):
         self.parser.add_argument("--nl_pairfunc", type=int, default=0,
                                  help='0 for guassian embedding, 1 for dot production')
         self.parser.add_argument("--sep_loss", action='store_true', help='switch on calculating loss for each individual.')
+        self.parser.add_argument("--loc_layer", type=float, default=5, help='the layer level to add location loss.')
         self.parser.add_argument("--loc_branch", action='store_true', help='switch on location branch.')
         self.parser.add_argument("--com_feat", action='store_true', help='switch on location branch.')
         self.parser.add_argument("--fpn", action='store_true', help='switch on adopting fpn architecture.')
