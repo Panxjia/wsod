@@ -94,10 +94,6 @@ class opts(object):
         self.parser.add_argument("--IN", action='store_true', help='switch on instance norm layer in first two conv blocks in Network.')
         self.parser.add_argument("--INL", action='store_true', help='switch on instance norm layer with learn affine parms in first two conv blocks in Network.')
         self.parser.add_argument("--RGAP", action='store_true', help='switch on residualized gap block.')
-        self.parser.add_argument("--sc", action='store_true', help='switch on the class similar loss.')
-        self.parser.add_argument("--sc_alpha", type=float, default=0.01, help='switch on the class similar loss.')
-        self.parser.add_argument("--sc_old", type=float, default=0.5, help='the weight of old cls protype.')
-        self.parser.add_argument("--sc_new", type=float, default=0.5, help='the weight of new cls protype.')
         self.parser.add_argument("--cls_th", type=float, default=0.1, help='the class threshold.')
         self.parser.add_argument("--cls_th_h", type=float, default=0.5, help='the class threshold.')
         self.parser.add_argument("--cls_th_l", type=float, default=0.1, help='the class threshold.')
@@ -130,6 +126,13 @@ class opts(object):
         self.parser.add_argument("--loss_w_5", type=float, default=0., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--loss_w_loc", type=float, default=1., help='weight of classification loss for 4-th level.')
         self.parser.add_argument("--erase", action='store_true', help='switch on erasing strategy.')
+        self.parser.add_argument("--memo", action='store_true', help='switch on memo strategy.')
+        self.parser.add_argument("--memo_lr", type=float, default=0.5,
+                                 help='the learning rate of memory module.')
+        self.parser.add_argument("--memo_alpha", type=float, default=1.,
+                                 help='the factor to adjust the bin weight in loc branch')
+        self.parser.add_argument("--memo_beta", type=float, default=1.,
+                                 help='the factor to adjust the bin weight in loc branch')
         self.parser.add_argument("--var_erase", action='store_true', help='switch on erasing strategy.')
         self.parser.add_argument("--neg_erase", action='store_true', help='switch on erasing strategy.')
         self.parser.add_argument("--l5_red", action='store_true', help='switch on erasing strategy.')
@@ -236,9 +239,6 @@ def train(args):
     top1 = AverageMeter()
     top5 = AverageMeter()
     protype_v = protype_h = None
-    if args.sc:
-        protype_h = MoveAverageMeter(args.num_classes, 7, old=args.sc_old, new=args.sc_new)
-        protype_v = MoveAverageMeter(args.num_classes, 7, old=args.sc_old, new=args.sc_new)
 
     args.device = torch.device('cuda') if args.gpus[0] >= 0 else torch.device('cpu')
     model, optimizer = get_model(args)
@@ -287,11 +287,6 @@ def train(args):
                                                          label[1].to(args.device), label[2].to(args.device)
 
             logits = model(img, is_training=True, label=child_label, erase_start=erase_st)
-            if args.sc:
-                child_map_h, child_map_v = model.module.child_cls_fea
-                protype_h.update(child_map_h.detach(), child_label.long())
-                protype_v.update(child_map_v.detach(), child_label.long())
-
 
             loss_val, loss_loc = model.module.get_loss(logits,child_label,
                     protype_h = protype_h, protype_v=protype_v, epoch=current_epoch,

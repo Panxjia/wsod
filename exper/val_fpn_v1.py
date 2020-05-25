@@ -97,6 +97,11 @@ class opts(object):
         self.parser.add_argument("--nl_kernel", type=int, default=-1, help='the kernel for non local module.')
         self.parser.add_argument("--nl_pairfunc", type=int, default=0,
                                  help='0 for guassian embedding, 1 for dot production')
+        self.parser.add_argument("--memo", action='store_true', help='switch on memo strategy.')
+        self.parser.add_argument("--memo_lr", type=float, default=0.5,
+                                 help='the learning rate of memory module.')
+        self.parser.add_argument("--memo_alpha", type=float, default=1.,
+                                 help='the factor to adjust the bin weight in loc branch')
         self.parser.add_argument("--sep_loss", action='store_true', help='switch on calculating loss for each individual.')
         self.parser.add_argument("--loc_layer", type=float, default=5, help='the layer level to add location loss.')
         self.parser.add_argument("--loc_branch", action='store_true', help='switch on location branch.')
