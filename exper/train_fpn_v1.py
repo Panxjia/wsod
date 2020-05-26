@@ -346,7 +346,8 @@ def train(args):
                                 'arch': args.arch,
                                 'global_counter': global_counter,
                                 'state_dict': model.state_dict(),
-                                'optimizer': optimizer.state_dict()
+                                'optimizer': optimizer.state_dict(),
+                                'memo_module':model.module.memo_module._memo_kv if args.memo else None
                             }, is_best=False,
                             filename='%s_epoch_%d_glo_step_%d.pth.tar'
                                      % (args.dataset, current_epoch, global_counter))

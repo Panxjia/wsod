@@ -29,6 +29,8 @@ def restore(args, model, optimizer, istrain=True, including_opt=False):
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(snapshot, checkpoint['epoch']))
+            if args.memo:
+                model.module.memo_module._memo_kv = checkpoint['memo_module']
         except KeyError:
             print("KeyError")
             if args.arch == 'vgg_v5_7' or args.arch == 'vgg_v7' or args.arch == 'vgg_v10':

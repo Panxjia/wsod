@@ -67,6 +67,7 @@ class opts(object):
         self.parser.add_argument("--debug", action='store_true', help='.')
         self.parser.add_argument("--vis_feat", action='store_true', help='.')
         self.parser.add_argument("--vis_var", action='store_true', help='.')
+        self.parser.add_argument("--vis_memo_gt", action='store_true', help='.')
         self.parser.add_argument("--debug_dir", type=str, default='../debug', help='save visualization results.')
         self.parser.add_argument("--vis_dir", type=str, default='../vis_dir', help='save visualization results.')
         self.parser.add_argument("--eval_gcam", action='store_true', help='.')
@@ -114,6 +115,8 @@ class opts(object):
         self.parser.add_argument("--vis_th", type=float, default=0.2, help='threshold for visualizatoin')
         self.parser.add_argument("--erase", action='store_true', help='switch on erasing strategy.')
         self.parser.add_argument("--l5_red", action='store_true', help='switch on erasing strategy.')
+        self.parser.add_argument("--th_bg", type=float, default=0.2, help='the variance threshold for back ground.')
+        self.parser.add_argument("--th_fg", type=float, default=0.5, help='the class threshold for fore ground.')
 
     def parse(self):
         opt = self.parser.parse_args()
@@ -251,6 +254,72 @@ def vis_feature(feat, img_path, vis_path, col=4, row=4, layer='feat3'):
         save_name = save_name.replace('.','_{}_{}.'.format(layer, fig_id))
         cv2.imwrite(os.path.join(vis_path, save_name), im_to_save)
         fig_id +=1
+
+def vis_memo_gt(cls_feat, memo_kv, gt_label, img_path, vis_path, alpha=1., beta=1., margin=0.1, net='vgg_memo'):
+    memo_neg_feat = memo_kv[200]
+    memo_pos_feat = memo_kv[gt_label.long().cpu().numpy()[0]]
+
+    n, c, h, w = cls_feat.size()
+    cls_feat_tmp = cls_feat.clone()
+    cls_feat_tmp = cls_feat_tmp.permute(2, 3, 0, 1).contiguous().view(-1, c).unsqueeze(1)
+    cls_feat_norm = torch.norm(cls_feat_tmp, p=2, dim=2).squeeze()
+    memo_neg_feat = memo_neg_feat.expand(h * w * n, c).unsqueeze(-1)
+    memo_pos_feat = memo_pos_feat.expand(h * w * n, -1).contiguous().view(h * w * n, -1).unsqueeze(-1)
+    memo_neg_norm = torch.norm(memo_neg_feat, p=2, dim=1).squeeze()
+    memo_pos_norm = torch.norm(memo_pos_feat, p=2, dim=1).squeeze()
+    cos_dis_neg = torch.bmm(cls_feat_tmp, memo_neg_feat).squeeze()
+    cos_dis_neg = cos_dis_neg / memo_neg_norm / cls_feat_norm
+    cos_dis_pos = torch.bmm(cls_feat_tmp, memo_pos_feat).squeeze()
+    cos_dis_pos = cos_dis_pos / memo_pos_norm / cls_feat_norm
+
+    cos_dis_neg = cos_dis_neg.view(h, w, n).permute(2, 0, 1).unsqueeze(1)
+    cos_dis_pos = cos_dis_pos.view(h, w, n).permute(2, 0, 1).unsqueeze(1)
+    # cos_dis = torch.cat((cos_dis_pos, cos_dis_neg), dim=1)
+    # cos_dis_norm = F.softmax(cos_dis, dim=1)
+    # cos_dis_abs = torch.pow(torch.abs(cos_dis_norm[:, :-1, ...] - cos_dis_norm[:, 1:, ...]), beta)
+    cos_dis_abs = torch.pow(torch.abs(cos_dis_pos - cos_dis_neg), beta)
+    bin_weight = torch.exp((cos_dis_abs - 1.) * alpha).squeeze()
+    cls_mask = (cos_dis_pos > (cos_dis_neg + margin)).float().squeeze()
+
+    bin_weight = bin_weight.data.cpu().numpy()
+    cls_mask = cls_mask.data.cpu().numpy()
+
+    im = cv2.imread(img_path)
+    h, w, _ = np.shape(im)
+    resized_cls_mask = cv2.resize(cls_mask, (w, h))
+    resized_bin_weight = cv2.resize(bin_weight, (w, h))
+
+    draw_im = 255 * np.ones((h + 15, w + 5, 3), np.uint8)
+    draw_im[:h, :w, :] = im
+    cv2.putText(draw_im, 'original image', (0, h + 12), color=(0, 0, 0),
+                fontFace=cv2.FONT_HERSHEY_COMPLEX,
+                fontScale=0.5)
+    im_to_save = [draw_im.copy()]
+
+    draw_im = 255 * np.ones((h + 15, w + 5, 3), np.uint8)
+    draw_im[:h, :w, :] = im
+    heatmap = cv2.applyColorMap(np.uint8(255 * resized_cls_mask), cv2.COLORMAP_JET)
+    draw_im[:h, :w, :] = heatmap * 0.5 + draw_im[:h, :w, :] * 0.5
+    cv2.putText(draw_im, 'memo_cls_mask', (0, h + 12), color=(0, 0, 0),
+                fontFace=cv2.FONT_HERSHEY_COMPLEX,
+                fontScale=0.5)
+    im_to_save.append(draw_im.copy())
+
+    draw_im = 255 * np.ones((h + 15, w + 5, 3), np.uint8)
+    draw_im[:h, :w, :] = im
+    heatmap = cv2.applyColorMap(np.uint8(255 * resized_bin_weight), cv2.COLORMAP_JET)
+    draw_im[:h, :w, :] = heatmap * 0.5 + draw_im[:h, :w, :] * 0.5
+    cv2.putText(draw_im, 'memo_bin_weight', (0, h + 12), color=(0, 0, 0),
+                fontFace=cv2.FONT_HERSHEY_COMPLEX,
+                fontScale=0.5)
+    im_to_save.append(draw_im.copy())
+
+    im_to_save = np.concatenate(im_to_save, axis=1)
+    vis_path = os.path.join(vis_path, 'vis_memo/vis_memo_{}'.format(net))
+    if not os.path.exists(vis_path):
+        os.makedirs(vis_path)
+    save_name = 'vgg_' + img_path.split('/')[-1]
+    cv2.imwrite(os.path.join(vis_path, save_name), im_to_save)
 
 def vis_var(feat, cls_logits, img_path, vis_path, net='vgg_baseline'):
 
@@ -457,7 +526,6 @@ def val(args):
             bs, ncrops, c, h, w = img.size()
             img = img.view(-1, c, h, w)
 
-
         # forward pass
         args.device = torch.device('cuda') if args.gpus[0]>=0 else torch.device('cpu')
         img = img.to(args.device)
@@ -478,6 +546,21 @@ def val(args):
                 var_logits = torch.var(cls_logits,dim=1).squeeze()
                 vis_var(var_logits, cls_logits[0,label.long(),...], img_path[0], args.vis_dir, net='vgg_baseline_var_cls')
             continue
+
+        if args.vis_memo_gt:
+            if idx in show_idxs:
+                _, img_loc, label = dat_loc
+                _ = model(img_loc)
+                if args.loc_layer == 3:
+                    memo_feat = model.module.feat_3_cls
+                elif args.loc_layer == 4:
+                    memo_feat = model.module.feat_4_cls
+                else:
+                    memo_feat = model.module.feat_5_cls
+                memo_kv = model.module.memo_module._memo_kv
+                vis_memo_gt(memo_feat, memo_kv, label, img_path[0], args.vis_dir, margin=0., net='memo_.1_.2_lr_.9_a_1')
+            continue
+
         logits = model(img)
 
 

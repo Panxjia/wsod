@@ -216,7 +216,7 @@ class VGG(nn.Module):
             if self.args.erase and is_training and erase_start:
                 ## top-down
                 feat_5_cls = self.cls_feat(feat_5_2)
-                cls_map = self.cls_feat(feat_5_cls)
+                cls_map = self.cls(feat_5_cls)
                 erase_mask_54 = self.erase_map(cls_map, feat_4_2, label, erase_th=self.args.erase_th_l5, var=self.args.var_erase)
                 feat_4_2 = feat_4_2 * erase_mask_54.detach()
                 self.erase_mask_54 = erase_mask_54
@@ -556,11 +556,11 @@ class VGG(nn.Module):
         n, c, h, w = cls_feat.size()
         cls_feat_tmp = cls_feat.clone()
         cls_feat_tmp  = cls_feat_tmp.permute(2,3,0,1).contiguous().view(-1, c).unsqueeze(1)
-        cls_feat_norm = torch.norm(cls_feat_tmp, p=2, dim=2).squeeze()
+        cls_feat_norm = torch.norm(cls_feat_tmp, p=2, dim=2).squeeze()+1e-12
         memo_neg_feat = memo_neg_feat.expand(h*w*n, c).unsqueeze(-1)
         memo_pos_feat = memo_pos_feat.expand(h*w,-1, -1).contiguous().view(h*w*n, -1).unsqueeze(-1)
-        memo_neg_norm = torch.norm(memo_neg_feat,p=2, dim=1).squeeze()
-        memo_pos_norm = torch.norm(memo_pos_feat,p=2, dim=1).squeeze()
+        memo_neg_norm = torch.norm(memo_neg_feat,p=2, dim=1).squeeze()+1e-12
+        memo_pos_norm = torch.norm(memo_pos_feat,p=2, dim=1).squeeze()+1e-12
         cos_dis_neg = torch.bmm(cls_feat_tmp, memo_neg_feat).squeeze()
         cos_dis_neg = cos_dis_neg/memo_neg_norm/cls_feat_norm
         cos_dis_pos = torch.bmm(cls_feat_tmp, memo_pos_feat).squeeze()
@@ -568,12 +568,13 @@ class VGG(nn.Module):
 
         cos_dis_neg = cos_dis_neg.view(h,w,n).permute(2,0,1).unsqueeze(1)
         cos_dis_pos = cos_dis_pos.view(h,w,n).permute(2,0,1).unsqueeze(1)
-        cos_dis = torch.cat((cos_dis_pos, cos_dis_neg), dim=1)
-        cos_dis_norm = F.softmax(cos_dis, dim=1)
-        cos_dis_abs = torch.pow(torch.abs(cos_dis_norm[:, :-1, ...] - cos_dis_norm[:, 1:, ...]), beta)
+        # cos_dis = torch.cat((cos_dis_pos, cos_dis_neg), dim=1)
+        # cos_dis_norm = F.softmax(cos_dis, dim=1)
+        # cos_dis_abs = torch.pow(torch.abs(cos_dis_norm[:, :-1, ...] - cos_dis_norm[:, 1:, ...]), beta)
+        cos_dis_abs = torch.pow(torch.abs(cos_dis_pos - cos_dis_neg), beta)
         bin_weight = torch.exp((cos_dis_abs-1.)*alpha)
+        # bin_weight[cos_dis_abs<0.01] = 0.
         cls_mask = (cos_dis_pos > cos_dis_neg).float()
-
         return loc_map_cls, cls_mask, bin_weight
 
     def get_loss_sep(self,logits, gt_child_label, protype_h=None, protype_v=None, epoch=0, epoch_th=20):
